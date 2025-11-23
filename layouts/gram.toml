@@ -3,170 +3,170 @@ outline_weight = 3.4
 [button_shape]
 radius = 21.8
 
-[[buttons]]
-fill = "#FFFFFF42"
-fill_active = "#FFFFFF"
+[[buttons]] #Start
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 0
-outline = "#FFFFFF"
-outline_active = "#FFFFFF"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [402.6, 204.06]
 
-[[buttons]]
-fill = "#5BCEFA42"
-fill_active = "#5BCEFA"
+[[buttons]] #Mod X
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 5
-outline = "#5BCEFA"
-outline_active = "#5BCEFA"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [138.26, 193.16]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] #Left
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 11
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [193.7, 169.86]
 
-[[buttons]]
-fill = "#FFFFFF42"
-fill_active = "#FFFFFF"
+[[buttons]] #Down
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 9
-outline = "#FFFFFF"
-outline_active = "#FFFFFF"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [250.52, 174.36]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] #Right
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 10
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [298.66, 207.22]
 
-[[buttons]]
-fill = "#5BCEFA42"
-fill_active = "#5BCEFA"
+[[buttons]] #RT
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 6
-outline = "#5BCEFA"
-outline_active = "#5BCEFA"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [495.1, 157.36]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] #Y
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 1
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [543.54, 125.06]
 
-[[buttons]]
-fill = "#FFFFFF42"
-fill_active = "#FFFFFF"
+[[buttons]] #Z
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 18
-outline = "#FFFFFF"
-outline_active = "#FFFFFF"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [600.2, 121.32]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] #A
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 19
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [657.38, 143.6]
 
-[[buttons]]
-fill = "#5BCEFA42"
-fill_active = "#5BCEFA"
+[[buttons]] #B
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 3
-outline = "#5BCEFA"
-outline_active = "#5BCEFA"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [504.82, 212.36]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] #X
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 2
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [552.88, 179.52]
 
-[[buttons]]
-fill = "#FFFFFF42"
-fill_active = "#FFFFFF"
+[[buttons]] #R3
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 7
-outline = "#FFFFFF"
-outline_active = "#FFFFFF"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [609.74, 175.52]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] #LB
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 8
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [667.0, 197.96]
 
-[[buttons]]
-fill = "#5BCEFA42"
-fill_active = "#5BCEFA"
+[[buttons]] #L
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 12
-outline = "#5BCEFA"
-outline_active = "#5BCEFA"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [290.32, 334.48]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] #Mod Y
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 13
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [329.54, 373.42]
 
-[[buttons]]
-fill = "#FFFFFF42"
-fill_active = "#FFFFFF"
+[[buttons]] # C left
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 14
-outline = "#FFFFFF"
-outline_active = "#FFFFFF"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [445.88, 317.58]
 
-[[buttons]]
-fill = "#5BCEFA42"
-fill_active = "#5BCEFA"
+[[buttons]] #C Up
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 16
-outline = "#5BCEFA"
-outline_active = "#5BCEFA"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [485.12, 278.38]
 
-[[buttons]]
-fill = "#5BCEFA42"
-fill_active = "#5BCEFA"
+[[buttons]] #L3
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 17
-outline = "#5BCEFA"
-outline_active = "#5BCEFA"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [461.96, 372.12]
 
-[[buttons]]
-fill = "#F5A9B842"
-fill_active = "#F5A9B8"
+[[buttons]] # C Down
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 4
-outline = "#F5A9B8"
-outline_active = "#F5A9B8"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [501.14, 333.16]
 
-[[buttons]]
-fill = "#FFFFFF42"
-fill_active = "#FFFFFF"
+[[buttons]] # C right
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 15
-outline = "#FFFFFF"
-outline_active = "#FFFFFF"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [540.42, 294.92]
 
-[[buttons]]
-fill = "#5BCEFA42"
-fill_active = "#5BCEFA"
+[[buttons]] #Up default id 20
+fill = "#00000000"
+fill_active = "#FF0000"
 id = 20
-outline = "#5BCEFA"
-outline_active = "#5BCEFA"
+outline = "#FF0000"
+outline_active = "#000000"
 pos = [259.68, 122.34]
