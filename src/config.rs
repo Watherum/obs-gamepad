@@ -209,6 +209,13 @@ pub struct Button {
     pub outline_weight: Option<f32>,
     pub outline: Option<Color>,
     pub outline_active: Option<Color>,
+    /// Optional human-readable name, shown by the web `?labels` overlay.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Space-separated skin roles for the `/skin` view, e.g. "a", "lb rb", or a
+    /// digital direction like "lup" / "rright". Empty = not shown on the skin.
+    #[serde(default)]
+    pub skin: Option<String>,
 }
 
 impl Button {
@@ -241,6 +248,8 @@ impl Button {
                 || self.outline.is_some()
                 || self.outline_active.is_some())
             .then(|| (ColorPair::new(outline_active, outline_inactive), weight)),
+            label: self.label.clone(),
+            skin: self.skin.clone(),
         }
     }
 }
@@ -266,6 +275,9 @@ pub struct Stick {
     pub gate_weight: Option<f32>,
     pub gate: Option<Color>,
     pub gate_active: Option<Color>,
+    /// Skin role for the `/skin` view: "left" or "right" (which analog stick).
+    #[serde(default)]
+    pub skin: Option<String>,
 }
 
 impl Stick {
@@ -315,6 +327,7 @@ impl Stick {
                 || self.gate.is_some()
                 || self.gate_active.is_some())
             .then(|| (gate_path, ColorPair::new(gate_active, gate_inactive), gate_weight)),
+            skin: self.skin.clone(),
         }
     }
 }

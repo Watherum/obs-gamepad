@@ -1,0 +1,67 @@
+# GameCube controller via a Lossless adapter in XInput mode (Rivals of Aether 2).
+# Read through the XInput backend and intended for the /skin view.
+#
+# button `id` = XInput button bit (A 12, B 13, X 14, Y 15, RB 9); 16/17 = L/R triggers.
+# stick `axes` = XInput thumb axes (0 LX, 1 LY = control stick; 2 RX, 3 RY = C-stick).
+# `skin` tags drive the Rivals 2 skin; Z lights both bumpers.
+
+[button_shape]
+radius = 21.8
+
+[[buttons]] # A
+id = 12
+label = "A"
+skin = "a"
+pos = [120.0, 80.0]
+
+[[buttons]] # B
+id = 13
+label = "B"
+skin = "b"
+pos = [170.0, 80.0]
+
+[[buttons]] # X
+id = 14
+label = "X"
+skin = "x"
+pos = [220.0, 80.0]
+
+[[buttons]] # Y
+id = 15
+label = "Y"
+skin = "y"
+pos = [270.0, 80.0]
+
+[[buttons]] # Z -> both bumpers
+id = 9
+label = "Z"
+skin = "lb rb"
+pos = [320.0, 80.0]
+
+[[buttons]] # Start
+id = 4
+label = "ST"
+skin = "start"
+pos = [370.0, 80.0]
+
+[[buttons]] # L trigger
+id = 16
+label = "L"
+skin = "lt"
+pos = [120.0, 140.0]
+
+[[buttons]] # R trigger
+id = 17
+label = "R"
+skin = "rt"
+pos = [170.0, 140.0]
+
+[[sticks]] # control stick -> left stick
+axes = [0, 1]
+skin = "left"
+pos = [140.0, 230.0]
+
+[[sticks]] # C-stick -> right stick
+axes = [2, 3]
+skin = "right"
+pos = [260.0, 230.0]

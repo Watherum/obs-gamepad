@@ -19,7 +19,16 @@ log = "0.4"
 env_logger = "0.11"
 serialport = { git = "https://github.com/erkki-silvola/serialport-rs", branch = "windows-overlapped-io" }
 color-eyre = "0.6"
+tiny_http = "0.12"
 
 [profile.release]
 lto = "thin"
 panic = "abort"
+
+# Optimize dependencies even in debug builds. The hot path in `--web` mode is
+# PNG compression (in the `png`/`miniz_oxide` deps) and tiny-skia rendering;
+# unoptimized those cost ~25ms/frame and can't keep up at 60fps, making the
+# overlay laggy. Optimizing deps keeps `cargo run` real-time while still leaving
+# our own crate unoptimized/debuggable.
+[profile.dev.package."*"]
+opt-level = 3

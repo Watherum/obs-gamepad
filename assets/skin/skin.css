@@ -1,0 +1,636 @@
+﻿body { background-color: rgba(0, 0, 0, 0); margin: 0px auto; overflow: hidden; }
+
+:root {
+    /* Arrow button image links */
+    --left-arrow-source-image: url("/skin/images/menus_buttons_xbox_LSB_allGrey.png");
+    --down-arrow-source-image: url("/skin/images/menus_buttons_xbox_LSB_allGrey.png");
+    --right-arrow-source-image: url("/skin/images/menus_buttons_xbox_LSB_allGrey.png");
+    --up-arrow-source-image: url("/skin/images/menus_buttons_xbox_LSB_allGrey.png");
+
+     /* Right side button image links */
+    --top-row-index-finger-button-source-image: url("/skin/images/menus_buttons_xbox_X.png");
+    --top-row-middle-finger-button-source-image: url("/skin/images/menus_buttons_xbox_Y.png");
+    --top-row-ring-finger-button-source-image: url("/skin/images/menus_buttons_xbox_RB.png");
+    --top-row-pinky-finger-button-source-image: url("/skin/images/menus_buttons_xbox_LB.png");
+    
+    --bot-row-index-finger-button-source-image: url("/skin/images/menus_buttons_xbox_A.png");
+    --bot-row-middle-finger-button-source-image: url("/skin/images/menus_buttons_xbox_B.png");
+    --bot-row-ring-finger-button-source-image: url("/skin/images/menus_buttons_xbox_RT.png");
+    --bot-row-pinky-finger-button-source-image: url("/skin/images/menus_buttons_xbox_LT.png");
+
+    /* Start/back vars */
+    --start-button-source-image: url("/skin/images/Empty.png");
+    --back-button-source-image: url("/skin/images/Empty.png");
+
+    /* L3/R3 button vars */
+    --ls-button-source-image: url("/skin/images/menus_buttons_xbox_LSB_white.png");
+    --rs-button-source-image: url("/skin/images/menus_buttons_xbox_LSB_white.png");
+
+
+    /* Location vars */
+    --a-top: 315px;
+    --b-top: 235px;
+    --x-top: 235px;
+    --y-top: 155px;
+    --rb-top: 55px;
+    --lb-top: 55px;
+    --rt-top: 25px;
+    --lt-top: 25px;
+
+    --ls-top: 170px;
+    --rs-top: 280px;
+
+    --a-left: 415px;
+    --b-left: 500px;
+    --x-left: 335px;
+    --y-left: 415px;
+    --rb-left: 360px;
+    --lb-left: 165px;
+    --rt-left: 500px;
+    --lt-left: 25px;
+
+    --ls-left: 65px;
+    --rs-left: 190px;
+
+    --dir-right-top: 170px;
+    --dir-right-left: 65px;
+    --dir-down-top: 280px;
+    --dir-down-left: 190px;
+    --dir-left-top: var(--dir-right-top);
+    --dir-left-left: var(--dir-right-left);
+    --dir-up-top: var(--dir-right-top);
+    --dir-up-left: var(--dir-right-left);
+
+    /* Visibility flags flags */
+    --visibility-start: hidden;
+    --visibility-back: hidden;
+
+    --vert-clearance: 160px;
+    --diag-vert-clearance: 80px;
+    --diag-horz-clearance: 140px;
+  
+    --horz-clearance: var(--vert-clearance);
+    --top-row-index-button-row: 0;
+    --top-row-index-button-col: 0;
+   
+    --top-row-index-finger-button-row: 0;
+    --top-row-index-finger-button-col: 0;
+    
+    --top-row-middle-finger-button-row: 0;
+    --top-row-middle-finger-button-col: 1;
+    
+    --top-row-ring-finger-button-row: 0;
+    --top-row-ring-finger-button-col: 2;
+    --top-row-pinky-finger-button-row: 0;
+    --top-row-pinky-finger-button-col: 3;
+    --bot-row-index-finger-button-row: 1;
+    --bot-row-index-finger-button-col: 0;
+    --bot-row-middle-finger-button-row: 1;
+    --bot-row-middle-finger-button-col: 1;
+    --bot-row-ring-finger-button-row: 1;
+    --bot-row-ring-finger-button-col: 2;
+    --bot-row-pinky-finger-button-row: 1;
+    --bot-row-pinky-finger-button-col: 3;
+
+}
+
+.controller {
+    left: 100%;
+}
+
+.controller.fight-stick {
+    /* background: url(https://imgur.com/AEMTeDY.png) center no-repeat; */
+    background: transparent;
+    height: 535px;
+    width: 1500px;
+}
+
+/* start/back */
+
+.fight-stick .back, .fight-stick .start {
+    position: fixed;
+    width: 100px;
+    height: 100px;
+    top: 70px;
+    display: block;
+    border-radius: 0%;
+    background-repeat: repeat;
+}
+
+.fight-stick .back {
+    background-image: var(--back-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    left: 335px;
+    background-size: cover;
+    visibility: var(--visibility-back);
+}
+
+.fight-stick .start {
+    background-image: var(--start-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    left: 439px;
+    background-size: cover;
+    visibility: var(--visibility-start);
+}
+
+.fight-stick .back.pressed, .fight-stick .start.pressed {
+    transform: translateY(0px);
+    -webkit-filter: brightness(100%) invert(0);
+    background-position-y: 100%;
+}
+
+/* Face buttons */
+
+.fight-stick .button {
+    position:fixed;
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    border-radius: 0px;
+    background-repeat: repeat;
+}
+
+.fight-stick .a {
+    background-image: var(--bot-row-index-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    top: var(--a-top);
+    left: var(--a-left);
+    --row: var(--bot-row-index-finger-button-row);
+    --col: var(--bot-row-index-finger-button-col);
+}
+
+.fight-stick .a.pressed {
+    --row: var(--bot-row-index-finger-button-row);
+    --col: var(--bot-row-index-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .b {
+    background-image: var(--bot-row-middle-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    top: var(--b-top);
+    left: var(--b-left);
+    --row: var(--bot-row-middle-finger-button-row);
+    --col: var(--bot-row-middle-finger-button-col);
+}
+
+
+.fight-stick .b.pressed {
+    --row: var(--bot-row-middle-finger-button-row);
+    --col: var(--bot-row-middle-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .x {
+    background-image: var(--top-row-index-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    top: var(--x-top);
+    left: var(--x-left);
+    --row: var(--top-row-index-finger-button-row);
+    --col: var(--top-row-index-finger-button-col);
+}
+
+.fight-stick .x.pressed {
+    --row: var(--top-row-index-finger-button-row);
+    --col: var(--top-row-index-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .y {
+    background-image: var(--top-row-middle-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    top: var(--y-top);
+    left: var(--y-left);
+    --row: var(--top-row-middle-finger-button-row);
+    --col: var(--top-row-middle-finger-button-col);
+}
+
+.fight-stick .y.pressed {
+    --row: var(--top-row-middle-finger-button-row);
+    --col: var(--top-row-middle-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .button.pressed {
+    transform: translateY(0px);
+    -webkit-filter: invert(0);
+}
+
+/* Bumpers */
+
+.fight-stick .bumper {
+    position:fixed;
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    border-radius: 0px;
+    background-repeat: repeat;
+}
+
+.fight-stick .bumper.right {
+    background-image: var(--top-row-ring-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    top: var(--rb-top);
+    left: var(--rb-left);
+    --row: var(--top-row-ring-finger-button-row);
+    --col: var(--top-row-ring-finger-button-col);
+}
+
+.fight-stick .bumper.right.pressed {
+    --row: var(--top-row-ring-finger-button-row);
+    --col: var(--top-row-ring-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .bumper.left {
+    position:fixed;
+    background-image: var(--top-row-pinky-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    float: right;
+    top: var(--lb-top);
+    left: var(--lb-left);
+    --row: var(--top-row-pinky-finger-button-row);
+    --col: var(--top-row-pinky-finger-button-col);
+}
+
+.fight-stick .bumper.left.pressed {
+    --row: var(--top-row-pinky-finger-button-row);
+    --col: var(--top-row-pinky-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .bumper.pressed {
+    transform: translateY(0px);
+    -webkit-filter: invert(0);
+}
+
+/* Triggers */
+
+.fight-stick .trigger-button {
+    position: fixed;
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+}
+
+.fight-stick .trigger-button.right {
+    background-image: var(--bot-row-ring-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    top: var(--rt-top);
+    left: var(--rt-left);
+    float: left;
+    --row: var(--bot-row-ring-finger-button-row);
+    --col: var(--bot-row-ring-finger-button-col);
+}
+
+.fight-stick .trigger-button.right.pressed {
+    --row: var(--bot-row-ring-finger-button-row);
+    --col: var(--bot-row-ring-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .trigger-button.left {
+    position:fixed;
+    background-image: var(--bot-row-pinky-finger-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    top: var(--lt-top);
+    left: var(--lt-left);
+    float: left;
+    --row: var(--bot-row-pinky-finger-button-row);
+    --col: var(--bot-row-pinky-finger-button-col);
+}
+
+.fight-stick .trigger-button.left.pressed {
+    --row: var(--bot-row-pinky-finger-button-row);
+    --col: var(--bot-row-pinky-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .trigger-button.pressed {
+    transform: translateY(0px);
+    -webkit-filter: invert(0);
+    background-position-y: 100%;
+}
+
+/* L3/R3 */
+
+.fight-stick .stick.right {
+    background-image: var(--rs-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    position: fixed;
+    top: var(--rs-top);
+    left: var(--rs-left);
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    display: block;
+}
+
+.fight-stick .stick.right.pressed {
+    --row: var(--top-row-index-finger-button-row);
+    --col: var(--top-row-index-finger-button-col);
+    background-position-y: 100%;
+}
+
+.fight-stick .stick.left {
+    background-image: var(--ls-button-source-image);
+    background-repeat: repeat;
+    background-color: transparent;
+    border-radius: 0px;
+    position: fixed;
+    top: var(--ls-top);
+    left: var(--ls-left);
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    display: block;
+    background-repeat: repeat;
+}
+
+.fight-stick .stick.left.pressed {
+    position: absolute;
+    background-position-y: 100%;
+}
+
+.fight-stick .quadrant {
+    display: none;
+}
+
+/* Stick */
+
+.fight-stick .fstick {
+    visibility: hidden;
+}
+
+.fight-stick .fstick.up {
+    background-position-x: 100%;
+}
+
+.fight-stick .fstick.down {
+    background-position-x: calc(4 * 100% / 8);
+}
+
+.fight-stick .fstick.left {
+    background-position-x: calc(6 * 100% / 8);
+}
+
+.fight-stick .fstick.right {
+    background-position-x: calc(2 * 100% / 8);
+}
+
+.fight-stick .fstick.up.right {
+    background-position-x: calc(100% / 8);
+}
+
+.fight-stick .fstick.up.left {
+    background-position-x: calc(7 * 100% / 8);
+}
+
+.fight-stick .fstick.down.right {
+    background-position-x: calc(3 * 100% / 8);
+}
+
+.fight-stick .fstick.down.left {
+    background-position-x: calc(5 * 100% / 8);
+}
+
+/* Direction buttons */
+
+.fight-stick .face {
+    position:fixed;
+}
+
+.fight-stick .face.up {
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    background-image: var(--up-arrow-source-image);
+    background-repeat: repeat;
+    border-radius: 0%;
+    opacity: 1;
+    display: block;
+    top: var(--dir-up-top);
+    left: var(--dir-up-left);
+    z-index: -2;
+}
+
+.fight-stick .face.up.pressed {
+    background-position-y: 100%;
+}
+
+.fight-stick .face.right {
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    background-image: var(--right-arrow-source-image);
+    background-repeat: repeat;
+    border-radius: 0%;
+    opacity: 1;
+    display: block;
+    top: var(--dir-right-top);
+    left: var(--dir-right-left);
+    z-index: -2;
+}
+
+.fight-stick .face.right.pressed {
+    background-position-y: 100%;
+}
+
+.fight-stick .face.down {
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    background-image: var(--down-arrow-source-image);
+    background-repeat: repeat;
+    border-radius: 0%;
+    opacity: 1;
+    display: block;
+    top: var(--dir-down-top);
+    left: var(--dir-down-left);
+    z-index: -2;
+}
+
+.fight-stick .face.down.pressed {
+    background-position-y: 100%;
+}
+
+.fight-stick .face.left {
+    width: 150px;
+    height: 150px;
+    background-size: cover;
+    background-image: var(--left-arrow-source-image);
+    background-repeat: repeat;
+    border-radius: 0%;
+    opacity: 1;
+    display: block;
+    top: var(--dir-left-top);
+    left: var(--dir-left-left);
+    z-index: -2;
+}
+
+.fight-stick .face.left.pressed {
+    background-position-y: 100%;
+}
+
+.fight-stick .face.pressed {
+    transform: translateY(0px);
+}
+
+/*******************************************************************************/
+/* GENERATED WITH https://kurtmage.github.io/Controller-overlay-css-generator/ */
+/*******************************************************************************/
+
+body { background-color: rgba(0, 0, 0, 0); margin: 0px auto; overflow: hidden; }
+
+.fight-stick .face.up {
+width: 150px;
+height: 150px;
+background-repeat: repeat;
+top: 170px;
+left: 65px;
+    z-index: -2;
+}
+
+.fight-stick .start {
+visibility: hidden;
+background-repeat: repeat;
+}
+
+.fight-stick .back {
+visibility: hidden;
+background-repeat: repeat;
+}
+
+.fight-stick .stick.left {
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_LSB_white.png") repeat scroll 0% 0% / cover padding-box border-box;
+width: 150px;
+height: 150px;
+background-image: url("/skin/images/menus_buttons_xbox_LSB_white.png");
+background-repeat: repeat;
+z-index: -1;
+}
+
+.fight-stick .stick.right {
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_LSB_white.png") repeat scroll 0% 0% / cover padding-box border-box;
+width: 150px;
+height: 150px;
+background-image: url("/skin/images/menus_buttons_xbox_LSB_white.png");
+background-repeat: repeat;
+z-index: -1;
+}
+
+.fight-stick .x.pressed {
+top: 235px;
+left: 335px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_X.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_X.png");
+background-repeat: repeat;
+}
+
+.fight-stick .y.pressed {
+top: 155px;
+left: 415px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_Y.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_Y.png");
+background-repeat: repeat;
+}
+
+.fight-stick .a.pressed {
+top: 315px;
+left: 415px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_A.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_A.png");
+background-repeat: repeat;
+}
+
+.fight-stick .b.pressed {
+top: 235px;
+left: 500px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_B.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_B.png");
+background-repeat: repeat;
+}
+
+.fight-stick .bumper.right.pressed {
+top: 55px;
+left: 360px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_RB.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_RB.png");
+background-repeat: repeat;
+}
+
+.fight-stick .bumper.left.pressed {
+top: 55px;
+left: 165px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_LB.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_LB.png");
+background-repeat: repeat;
+}
+
+.fight-stick .trigger-button.right.pressed {
+top: 25px;
+left: 500px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_RT.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_RT.png");
+background-repeat: repeat;
+}
+
+.fight-stick .trigger-button.left.pressed {
+top: 25px;
+left: 25px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_LT.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_LT.png");
+background-repeat: repeat;
+}
+
+.fight-stick .stick.left.pressed {
+top: 170px;
+left: 65px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_LSB_white.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_LSB_white.png");
+background-repeat: repeat;
+}
+
+.fight-stick .stick.right.pressed {
+top: 280px;
+left: 190px;
+background: rgba(0, 0, 0, 0) url("/skin/images/menus_buttons_xbox_LSB_white.png") repeat scroll 0% 100% / cover padding-box border-box;
+background-image: url("/skin/images/menus_buttons_xbox_LSB_white.png");
+background-repeat: repeat;
+}
+
+.fight-stick .fstick {
+background-repeat: repeat;
+}
+
+.fight-stick.disconnected {
+    margin:auto;
+    width:100%;
+    height:50%;
+    background: url(/skin/images/Empty.png) no-repeat;
+    z-index: 2;
+    left:60%;
+}
+

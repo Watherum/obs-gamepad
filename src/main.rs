@@ -2,6 +2,8 @@ mod config;
 mod gamepad;
 mod haybox;
 mod usb;
+mod web;
+mod xinput;
 
 use std::io::Write;
 use std::time::{Duration, Instant};
@@ -15,8 +17,9 @@ use notify_debouncer_mini::{DebouncedEvent, DebouncedEventKind};
 use tiny_skia::Pixmap;
 
 use config::ConfigWatcher;
-use gamepad::{Gamepad, Inputs};
+use gamepad::Gamepad;
 use usb::UsbGamepad;
+use xinput::XInput;
 
 const FPS: usize = 60;
 const BENCHMARK: bool = false;
@@ -26,15 +29,64 @@ fn main() -> Result<(), ()> {
     color_eyre::install().unwrap();
     let mut gamepad = Gamepad::default();
     let mut watcher = ConfigWatcher::new(Duration::from_millis(100));
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let arg = match args.as_slice() {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    let mut web = false;
+    let mut port: u16 = 8080;
+    let mut scale: f32 = 1.0;
+    let mut positionals: Vec<String> = Vec::new();
+    let mut rest = raw.into_iter();
+    while let Some(a) = rest.next() {
+        match a.as_str() {
+            "--web" | "--serve" | "-w" => web = true,
+            "--port" | "-p" => match rest.next().and_then(|v| v.parse().ok()) {
+                Some(p) => port = p,
+                None => {
+                    println!("--port expects a number, e.g. --port 8080");
+                    return Err(());
+                }
+            },
+            s if s.starts_with("--port=") => match s["--port=".len()..].parse() {
+                Ok(p) => port = p,
+                Err(_) => {
+                    println!("--port expects a number, e.g. --port=8080");
+                    return Err(());
+                }
+            },
+            "--scale" | "-s" => match rest.next().and_then(|v| v.parse::<f32>().ok()) {
+                Some(x) if x > 0.0 => scale = x,
+                _ => {
+                    println!("--scale expects a positive number, e.g. --scale 2");
+                    return Err(());
+                }
+            },
+            s if s.starts_with("--scale=") => match s["--scale=".len()..].parse::<f32>() {
+                Ok(x) if x > 0.0 => scale = x,
+                _ => {
+                    println!("--scale expects a positive number, e.g. --scale=2");
+                    return Err(());
+                }
+            },
+            s if s.starts_with('-') => {
+                println!("Unknown flag '{s}'");
+                return Err(());
+            }
+            _ => positionals.push(a),
+        }
+    }
+    let arg = match positionals.as_slice() {
         [] => "layouts/test.toml",
-        [path] => path,
-        [_, _, ..] => {
-            println!("Pass no args for debug mode, or just the path to a config file");
+        [path] => path.as_str(),
+        _ => {
+            println!(
+                "Usage: obs-gamepad [--web] [--port <N>] [--scale <N>] [config.toml]\n  \
+                 no args   = debug window on layouts/test.toml\n  \
+                 --web     = serve the overlay over the local network instead of a window\n  \
+                 --scale N = render the overlay at N\u{00d7} resolution (default 1)"
+            );
             return Err(());
         }
     };
+    gamepad.scale = scale;
     let watch_file = fs::canonicalize(arg).unwrap();
     watcher.change_file(&watch_file).unwrap();
     let mut last_change = Instant::now();
@@ -47,7 +99,9 @@ fn main() -> Result<(), ()> {
     let config: Result<config::Gamepad, toml::de::Error> =
         toml::from_str(&fs::read_to_string(&watch_file).unwrap());
     if let Err(e) = config.map(|c| {
-        let res = if id < 10 {
+        let res = if id >= 20 {
+            gamepad.load::<XInput>(&c, (id - 20) as u32)
+        } else if id < 10 {
             gamepad.load::<UsbGamepad>(&c, (Gilrs::new().unwrap(), id))
         } else {
             let name =
@@ -61,13 +115,17 @@ fn main() -> Result<(), ()> {
         error!("Invalid config: {e}\n")
     }
 
+    if web {
+        return web::serve(gamepad, watcher, watch_file, port);
+    }
+
     let options = WindowOptions {
         resize: false,
         scale_mode: ScaleMode::Stretch,
         ..Default::default()
     };
 
-    let mut img = create_image(&gamepad.inputs);
+    let mut img = create_image(&gamepad);
     let mut width = img.width() as usize;
     let mut height = img.height() as usize;
     let mut buf = vec![0u32; width * height];
@@ -96,12 +154,10 @@ fn main() -> Result<(), ()> {
                     Ok(config) => {
                         println!("Reloaded config...");
                         gamepad.reload(&config);
-                        let bounds = gamepad.inputs.bounds();
-                        if width != bounds.right() as usize
-                            || height != bounds.bottom() as usize
-                        {
+                        let (nw, nh) = gamepad.image_size();
+                        if width != nw as usize || height != nh as usize {
                             info!("Resized, making new window...");
-                            img = create_image(&gamepad.inputs);
+                            img = create_image(&gamepad);
                             width = img.width() as usize;
                             height = img.height() as usize;
                             buf = vec![0u32; width * height];
@@ -139,6 +195,9 @@ fn pick_input(max_gamepads: usize, gilrs: &Gilrs) -> usize {
     for (id, (name, desc)) in haybox::get_ports().iter().enumerate() {
         println!("{}: {name} {desc}", id + 10);
     }
+    for slot in xinput::get_slots() {
+        println!("{}: XInput controller (slot {slot})", 20 + slot);
+    }
     print!("\nEnter an id: ");
     io::stdout().flush().unwrap();
     let mut line = String::new();
@@ -152,9 +211,7 @@ fn update_screen(img: &mut Pixmap, buf: &mut [u32]) {
     }
 }
 
-fn create_image(inputs: &Inputs) -> Pixmap {
-    let bounds = inputs.bounds();
-    let width = bounds.right() as usize;
-    let height = bounds.bottom() as usize;
-    Pixmap::new(width as u32, height as u32).unwrap()
+fn create_image(gamepad: &Gamepad) -> Pixmap {
+    let (width, height) = gamepad.image_size();
+    Pixmap::new(width, height).unwrap()
 }

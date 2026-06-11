@@ -1,0 +1,100 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>obs-gamepad skin</title>
+<link rel="stylesheet" href="/skin/skin.css">
+<style>
+/* Grayed-out "ghost" stick fixed at each home position, sitting under the
+   white stick (z-index -1) so viewers can see how far the stick deflects. */
+.fight-stick .stick-ghost {
+  position: fixed;
+  width: 150px;
+  height: 150px;
+  background-image: url("/skin/images/menus_buttons_xbox_LSB_allGrey.png");
+  background-size: cover;
+  background-repeat: no-repeat;
+  background-position-y: 0%;
+  opacity: 0.55;
+  z-index: -2;
+}
+.fight-stick .stick-ghost.left  { top: 170px; left: 65px; }
+.fight-stick .stick-ghost.right { top: 280px; left: 190px; }
+</style>
+</head>
+<body>
+<div class="controller fight-stick">
+  <span class="trigger-button left"></span>
+  <span class="trigger-button right"></span>
+  <span class="bumper left"></span>
+  <span class="bumper right"></span>
+  <span class="button y"></span>
+  <span class="button x"></span>
+  <span class="button b"></span>
+  <span class="button a"></span>
+  <span class="stick-ghost left"></span>
+  <span class="stick-ghost right"></span>
+  <span class="stick left"></span>
+  <span class="stick right"></span>
+</div>
+
+<script>
+// Normalized skin state arrives over SSE as "<mask>;<lx>,<ly>,<rx>,<ry>".
+// The server maps any controller onto these via layout `skin` roles, so this
+// page is controller-agnostic. Bit -> skin element:
+const BITS = [
+  ".fight-stick .a",
+  ".fight-stick .b",
+  ".fight-stick .x",
+  ".fight-stick .y",
+  ".fight-stick .bumper.left",   // 4  LB
+  ".fight-stick .bumper.right",  // 5  RB
+  ".fight-stick .trigger-button.left",   // 6  LT
+  ".fight-stick .trigger-button.right",  // 7  RT
+  ".fight-stick .stick.left",    // 8  L3 (click)
+  ".fight-stick .stick.right",   // 9  R3 (click)
+  ".fight-stick .start",         // 10 Start
+];
+const DEFLECT = 45; // px the stick image shifts at full deflection
+
+const els = BITS.map((sel) => document.querySelector(sel));
+const stickLeft = document.querySelector(".fight-stick .stick.left");
+const stickRight = document.querySelector(".fight-stick .stick.right");
+
+function apply(data) {
+  const [maskStr, sticks] = data.split(";");
+  const mask = parseInt(maskStr, 10) || 0;
+  const [lx, ly, rx, ry] = (sticks || "0,0,0,0").split(",").map(parseFloat);
+  els.forEach((el, bit) => el && el.classList.toggle("pressed", (mask & (1 << bit)) !== 0));
+  stickLeft.style.transform = `translate(${(lx || 0) * DEFLECT}px, ${(ly || 0) * DEFLECT}px)`;
+  stickRight.style.transform = `translate(${(rx || 0) * DEFLECT}px, ${(ry || 0) * DEFLECT}px)`;
+}
+
+// Optional ?hide=lb,start,... removes elements from the overlay (e.g. a GC
+// controller has no separate LB, so /skin?hide=lb shows only RB from Z).
+const HIDE_SEL = {
+  a: ".fight-stick .a", b: ".fight-stick .b", x: ".fight-stick .x", y: ".fight-stick .y",
+  lb: ".fight-stick .bumper.left", rb: ".fight-stick .bumper.right",
+  lt: ".fight-stick .trigger-button.left", rt: ".fight-stick .trigger-button.right",
+  start: ".fight-stick .start",
+  lstick: ".fight-stick .stick.left, .fight-stick .stick-ghost.left",
+  rstick: ".fight-stick .stick.right, .fight-stick .stick-ghost.right",
+};
+const hideParam = new URLSearchParams(location.search).get("hide");
+if (hideParam) {
+  for (const name of hideParam.split(",").map((s) => s.trim())) {
+    const sel = HIDE_SEL[name];
+    if (sel) document.querySelectorAll(sel).forEach((el) => (el.style.display = "none"));
+  }
+}
+
+// EventSource auto-reconnects if the server restarts.
+function connect() {
+  const es = new EventSource("/events");
+  es.onmessage = (e) => apply(e.data);
+  es.onerror = () => {};
+}
+connect();
+</script>
+</body>
+</html>

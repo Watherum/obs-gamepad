@@ -6,11 +6,26 @@ use tiny_skia::{
 
 use crate::config::{self, FillDir};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Gamepad<'b> {
     pub backend: Option<Box<dyn Backend + 'b>>,
     pub inputs: Inputs,
     pub input_state: InputState,
+    /// Render-resolution multiplier. 1.0 = native layout size; >1 renders the
+    /// same layout into a proportionally larger pixmap so it stays crisp when
+    /// displayed/scaled up. The OBS plugin leaves this at 1.0.
+    pub scale: f32,
+}
+
+impl Default for Gamepad<'_> {
+    fn default() -> Self {
+        Self {
+            backend: None,
+            inputs: Inputs::default(),
+            input_state: InputState::default(),
+            scale: 1.0,
+        }
+    }
 }
 
 impl<'b> Gamepad<'b> {
@@ -18,7 +33,16 @@ impl<'b> Gamepad<'b> {
     fn new(config: &config::Gamepad) -> Self {
         let inputs: Inputs = config.into();
         let input_state = (&inputs).into();
-        Self { backend: None, inputs, input_state }
+        Self { backend: None, inputs, input_state, scale: 1.0 }
+    }
+
+    /// Pixel dimensions of the output image at the current `scale`.
+    #[allow(dead_code)] // used by the binary (main/web), not the OBS cdylib
+    pub fn image_size(&self) -> (u32, u32) {
+        let bounds = self.inputs.bounds();
+        let w = ((bounds.right() * self.scale).ceil() as u32).max(1);
+        let h = ((bounds.bottom() * self.scale).ceil() as u32).max(1);
+        (w, h)
     }
 
     pub fn reload(&mut self, config: &config::Gamepad) {
@@ -112,6 +136,8 @@ pub struct Button {
     pub path: Path,
     pub fill: ColorPair,
     pub outline: Option<(ColorPair, f32)>,
+    pub label: Option<String>,
+    pub skin: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -133,6 +159,7 @@ pub struct Stick {
     pub fill: ColorPair,
     pub outline: Option<(ColorPair, f32)>,
     pub gate: Option<(Path, ColorPair, f32)>,
+    pub skin: Option<String>,
 }
 
 // TODO
@@ -172,7 +199,9 @@ impl Gamepad<'_> {
         let mut stroke = Stroke::default();
         let mut paint = Paint { anti_alias: true, ..Default::default() };
         let f = FillRule::default();
-        let t = Transform::default();
+        // Everything is drawn through this transform, so bumping `scale` renders
+        // the whole layout (paths, strokes, displacements) at a higher resolution.
+        let t = Transform::from_scale(self.scale, self.scale);
         img.fill(Color::TRANSPARENT);
 
         for (button, &pressed) in self.inputs.buttons.iter().zip(&self.input_state.buttons)
@@ -243,7 +272,7 @@ impl Gamepad<'_> {
                 img.stroke_path(path, &paint, &stroke, t, None);
             }
 
-            let trans = Transform::from_translate(cx, cy);
+            let trans = t.pre_translate(cx, cy);
             paint.set_color(stick.fill.get(is_active));
             img.fill_path(&stick.path, &paint, f, trans, None);
 

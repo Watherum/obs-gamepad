@@ -2,6 +2,7 @@ mod config;
 mod gamepad;
 mod haybox;
 mod usb;
+mod xinput;
 
 use std::{
     borrow::Cow,
@@ -23,6 +24,7 @@ use tiny_skia::Pixmap;
 use config::ConfigWatcher;
 use gamepad::{Backend, Gamepad, Inputs};
 use usb::UsbGamepad;
+use xinput::XInput;
 
 obs_register_module!(GamepadModule);
 struct GamepadModule {
@@ -91,13 +93,18 @@ impl<'b> Source<'b> {
     fn update_settings(&mut self, settings: &DataObj) {
         if let Some(name) = settings.get::<ObsString>(SETTING_GAMEPAD) {
             info!("selected a new gamepad: {}", name.as_str());
-            match if let Ok(n) = name.as_str().parse() {
+            let s = name.as_str();
+            let backend = if let Some(slot) = s.strip_prefix("xinput:") {
+                XInput::init(slot.parse().unwrap_or(0), &self.gamepad.inputs)
+                    .map(|b| Box::new(b) as Box<_>)
+            } else if let Ok(n) = s.parse() {
                 UsbGamepad::init((Gilrs::new().unwrap(), n), &self.gamepad.inputs)
                     .map(|b| Box::new(b) as Box<_>)
             } else {
-                Haybox::init((name.as_str().to_owned(), 115200), &self.gamepad.inputs)
+                Haybox::init((s.to_owned(), 115200), &self.gamepad.inputs)
                     .map(|b| Box::new(b) as Box<_>)
-            } {
+            };
+            match backend {
                 Ok(b) => self.gamepad.backend = Some(b),
                 Err(_) => error!("failed to load backend"),
             }
@@ -148,6 +155,9 @@ impl GetPropertiesSource for Source<'_> {
         }
         for (name, desc) in haybox::get_ports() {
             list.push(format!("{desc} ({name})"), name.into());
+        }
+        for slot in xinput::get_slots() {
+            list.push(format!("XInput controller (slot {slot})"), format!("xinput:{slot}").into());
         }
 
         let path_config = PathProp::new(PathType::File)
