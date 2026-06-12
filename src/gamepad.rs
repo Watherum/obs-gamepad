@@ -137,6 +137,8 @@ pub struct Button {
     pub fill: ColorPair,
     pub outline: Option<(ColorPair, f32)>,
     pub label: Option<String>,
+    /// Label text color pair (inactive/active). `None` = use the CSS default (#fff).
+    pub label_color: Option<ColorPair>,
     pub skin: Option<String>,
 }
 

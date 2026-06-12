@@ -93,23 +93,24 @@ fn main() -> Result<(), ()> {
 
     let gilrs = Gilrs::new().unwrap();
     let ports = serialport::available_ports().unwrap_or_default();
-    let max_gamepads = gilrs.last_gamepad_hint();
-    let id = pick_input(max_gamepads, &gilrs);
+    let id = pick_input(&gilrs);
 
     let config: Result<config::Gamepad, toml::de::Error> =
         toml::from_str(&fs::read_to_string(&watch_file).unwrap());
     if let Err(e) = config.map(|c| {
-        let res = if id >= 20 {
-            gamepad.load::<XInput>(&c, (id - 20) as u32)
-        } else if id < 10 {
-            gamepad.load::<UsbGamepad>(&c, (Gilrs::new().unwrap(), id))
-        } else {
-            let name =
-                &ports.get(id - 10).expect("couldn't find or open serial port").port_name;
-            gamepad.load::<Haybox>(&c, (name.clone(), 115200))
-        };
-        if let Err(e) = res {
-            error!("Failed to initialize backend {e:?}");
+        if let Some(id) = id {
+            let res = if id >= 20 {
+                gamepad.load::<XInput>(&c, (id - 20) as u32)
+            } else if id < 10 {
+                gamepad.load::<UsbGamepad>(&c, (Gilrs::new().unwrap(), id))
+            } else {
+                let name =
+                    &ports.get(id - 10).expect("couldn't find or open serial port").port_name;
+                gamepad.load::<Haybox>(&c, (name.clone(), 115200))
+            };
+            if let Err(e) = res {
+                error!("Failed to initialize backend {e:?}");
+            }
         }
     }) {
         error!("Invalid config: {e}\n")
@@ -186,23 +187,56 @@ fn main() -> Result<(), ()> {
     Ok(())
 }
 
-// returns selected id
-fn pick_input(max_gamepads: usize, gilrs: &Gilrs) -> usize {
-    println!("\nDetected {} gamepads:", max_gamepads);
-    for (id, name) in usb::get_devices(gilrs) {
-        println!("{id}: {name}");
+fn pick_input(gilrs: &Gilrs) -> Option<usize> {
+    // USB HID gamepads (ids 0–9)
+    let mut usb: Vec<(usize, String)> = usb::get_devices(gilrs).into_iter().collect();
+    usb.sort_by_key(|(id, _)| *id);
+
+    // Serial / Haybox (ids 10+), sorted by port name for stable ordering
+    let mut com_ports: Vec<(String, String)> = haybox::get_ports().into_iter().collect();
+    com_ports.sort_by(|(a, _), (b, _)| a.cmp(b));
+    let com: Vec<(usize, String)> = com_ports
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc))| (i + 10, format!("{name}  {desc}")))
+        .collect();
+
+    // XInput (ids 20+) — never a leverless controller; excluded when COM
+    // ports are present so the gram/leverless layout always skips them.
+    let xinput: Vec<(usize, String)> = xinput::get_slots()
+        .into_iter()
+        .map(|slot| (20 + slot as usize, format!("XInput controller (slot {slot})")))
+        .collect();
+
+    let candidates: Vec<(usize, String)> = if !com.is_empty() {
+        // COM present → USB HID + COM only (XInput excluded)
+        usb.into_iter().chain(com).collect()
+    } else {
+        // No COM → USB HID + XInput
+        usb.into_iter().chain(xinput).collect()
+    };
+
+    match candidates.as_slice() {
+        [] => {
+            println!("No input devices found, running without a controller.");
+            None
+        }
+        [(id, name)] => {
+            println!("Auto-connecting to: {name}");
+            Some(*id)
+        }
+        _ => {
+            println!("\nMultiple devices found:");
+            for (id, name) in &candidates {
+                println!("  {id}: {name}");
+            }
+            print!("\nEnter an id: ");
+            io::stdout().flush().unwrap();
+            let mut line = String::new();
+            io::stdin().read_line(&mut line).unwrap();
+            Some(line.trim().parse().expect("input a number"))
+        }
     }
-    for (id, (name, desc)) in haybox::get_ports().iter().enumerate() {
-        println!("{}: {name} {desc}", id + 10);
-    }
-    for slot in xinput::get_slots() {
-        println!("{}: XInput controller (slot {slot})", 20 + slot);
-    }
-    print!("\nEnter an id: ");
-    io::stdout().flush().unwrap();
-    let mut line = String::new();
-    io::stdin().read_line(&mut line).unwrap();
-    line.trim().parse().expect("input a number")
 }
 
 fn update_screen(img: &mut Pixmap, buf: &mut [u32]) {

@@ -212,6 +212,12 @@ pub struct Button {
     /// Optional human-readable name, shown by the web `?labels` overlay.
     #[serde(default)]
     pub label: Option<String>,
+    /// Text color for this button's label in the `?labels` overlay (inactive).
+    #[serde(default)]
+    pub label_color: Option<Color>,
+    /// Text color for this button's label when pressed (defaults to `label_color`).
+    #[serde(default)]
+    pub label_color_active: Option<Color>,
     /// Space-separated skin roles for the `/skin` view, e.g. "a", "lb rb", or a
     /// digital direction like "lup" / "rright". Empty = not shown on the skin.
     #[serde(default)]
@@ -249,6 +255,11 @@ impl Button {
                 || self.outline_active.is_some())
             .then(|| (ColorPair::new(outline_active, outline_inactive), weight)),
             label: self.label.clone(),
+            label_color: {
+                let inactive = self.label_color.or(config.label_color);
+                let active = self.label_color_active.or(self.label_color).or(config.label_color);
+                inactive.map(|i| ColorPair { inactive: i.into(), active: active.unwrap().into() })
+            },
             skin: self.skin.clone(),
         }
     }
@@ -429,6 +440,9 @@ pub struct Gamepad {
     pub gate_radius: Option<f32>,
     #[serde(default)]
     pub fill_dir: FillDir,
+    /// Default label text color for all buttons (overridden per-button by `label_color`).
+    #[serde(default)]
+    pub label_color: Option<Color>,
     #[serde(default)]
     pub buttons: Vec<Button>,
     #[serde(default)]

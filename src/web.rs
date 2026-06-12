@@ -284,6 +284,11 @@ fn html_escape(s: &str) -> String {
 /// labeled button's name centered on it. Label positions are the buttons' centers
 /// in final (scaled) image coordinates, placed inside a wrapper that scales to fit
 /// the viewport so the names track the image at any display size.
+fn css_color(c: tiny_skia::Color) -> String {
+    let u = c.to_color_u8();
+    format!("rgba({},{},{},{})", u.red(), u.green(), u.blue(), u.alpha())
+}
+
 fn build_labels_page(gamepad: &Gamepad) -> String {
     let (w, h) = gamepad.image_size();
     let scale = gamepad.scale;
@@ -304,38 +309,226 @@ fn build_labels_page(gamepad: &Gamepad) -> String {
         for arrow in ['↑', '↓', '←', '→'] {
             text = text.replace(arrow, &format!("<span class=\"ar\">{arrow}</span>"));
         }
+        let (color_style, active_attr) = match &button.label_color {
+            Some(pair) => {
+                let inactive = css_color(pair.inactive);
+                let active = css_color(pair.active);
+                let attr = if active != inactive {
+                    format!(" data-lca=\"{active}\"")
+                } else {
+                    String::new()
+                };
+                (format!(";color:{inactive}"), attr)
+            }
+            None => (String::new(), String::new()),
+        };
         labels.push_str(&format!(
-            "<div class=\"l\" data-id=\"{id}\" style=\"left:{cx:.1}px;top:{cy:.1}px;font-size:{fs:.1}px\">{text}</div>"
+            "<div class=\"l\" data-id=\"{id}\"{active_attr} style=\"left:{cx:.1}px;top:{cy:.1}px;font-size:{fs:.1}px{color_style}\">{text}</div>"
         ));
     }
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\">\
-<title>obs-gamepad labels</title><style>\
-@font-face{{font-family:'Teko';src:url('/fonts/teko.ttf') format('truetype');\
-font-weight:300 700;font-display:swap}}\
-html,body{{margin:0;height:100%;overflow:hidden;background:#1e1e1e}}\
-#w{{position:absolute;top:0;left:0;width:{w}px;height:{h}px;transform-origin:top left}}\
-#w img{{position:absolute;top:0;left:0;width:100%;height:100%}}\
-.l{{position:absolute;transform:translate(-50%,-45%);color:#fff;line-height:1;\
-font-family:'Teko',Arial,sans-serif;font-weight:700;white-space:nowrap;\
-pointer-events:none;text-shadow:0 0 4px #000,0 0 4px #000}}\
-.ar{{-webkit-text-stroke:0.08em currentColor;paint-order:stroke fill}}\
-</style></head><body>\
-<div id=\"w\"><img src=\"/stream\" alt=\"overlay\">{labels}</div>\
-<script>\
-var w=document.getElementById('w');\
-function fit(){{var s=Math.min(innerWidth/{w},innerHeight/{h})*0.8;\
-w.style.transform='translate('+((innerWidth-{w}*s)/2)+'px,'+((innerHeight-{h}*s)/2)+'px) scale('+s+')';}}\
-addEventListener('resize',fit);fit();\
-if(location.search.indexOf('pressed')>=0){{\
-var ls=document.querySelectorAll('.l');\
-ls.forEach(function(el){{el.style.visibility='hidden';}});\
-var es=new EventSource('/events');\
-es.onmessage=function(e){{var m=parseInt(e.data.split(';')[2],10)||0;\
-ls.forEach(function(el){{el.style.visibility=(m&(1<<+el.dataset.id))?'visible':'hidden';}});}};\
-}}\
-</script></body></html>"
-    )
+
+    // Static CSS, HTML and JS for the hidden color-picker panel (backtick to toggle).
+    let panel_css = r#"
+#cm{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+background:#1a1a1a;border:1px solid #444;border-radius:10px;padding:18px 20px;
+display:none;z-index:999;color:#ccc;font-family:sans-serif;font-size:13px;
+box-shadow:0 8px 32px #000c;min-width:230px;user-select:none}
+#cm h3{margin:0 0 10px;font-size:14px;color:#fff;letter-spacing:.04em}
+.cr{display:flex;align-items:center;gap:10px;margin:9px 0}
+.cr label{flex:0 0 58px;font-size:12px;color:#888}
+#cc{width:42px;height:28px;border:none;padding:1px 2px;border-radius:4px;
+background:#333;cursor:pointer;flex-shrink:0}
+#co{flex:1;accent-color:#aaa;cursor:pointer}
+#ch{flex:1;background:#252525;border:1px solid #444;border-radius:4px;
+color:#ddd;font-size:12px;padding:3px 6px;font-family:monospace;width:0}
+#cpv{padding:3px 12px;border-radius:4px;background:#2a2a2a;
+font-weight:700;font-size:16px;font-family:'Teko',Arial,sans-serif}
+.cm-hint{font-size:11px;color:#555;margin-top:14px;text-align:center}
+#cwbtn{width:100%;background:#252525;border:1px solid #3a3a3a;border-radius:5px;
+color:#888;padding:5px 8px;cursor:pointer;margin-bottom:8px;font-size:12px;text-align:center}
+#cwbtn:hover{background:#2e2e2e;color:#ccc}
+#cwrap{display:none;justify-content:center;padding:4px 0 8px}
+#cwheel{display:block;cursor:crosshair}
+"#;
+
+    let panel_html = r##"<div id="cm">
+<h3>Label Color</h3>
+<button id="cwbtn">&#9660; Color wheel</button>
+<div id="cwrap"><canvas id="cwheel" width="180" height="180"></canvas></div>
+<div class="cr"><label>Color</label><input type="color" id="cc" value="#ffffff"></div>
+<div class="cr"><label>Opacity</label><input type="range" id="co" min="0" max="100" value="100"></div>
+<div class="cr"><label>Hex</label><input type="text" id="ch" maxlength="9" placeholder="#rrggbbaa" spellcheck="false"></div>
+<div class="cr"><label>Preview</label><span id="cpv">Aa</span></div>
+<div class="cm-hint">press ` to close &nbsp;·&nbsp; resets on reload</div>
+</div>"##;
+
+    let panel_js = r##"
+var cm=document.getElementById('cm');
+var cc=document.getElementById('cc');
+var co=document.getElementById('co');
+var ch=document.getElementById('ch');
+var cpv=document.getElementById('cpv');
+function h2r(h){return[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];}
+function toHex2(n){return('0'+Math.round(n).toString(16)).slice(-2);}
+function applyLC(col){
+  document.querySelectorAll('.l').forEach(function(el){
+    el.style.color=col;
+    if(el.dataset.lca)el.style.setProperty('--lci',col);
+  });
+  cpv.style.color=col;
+}
+function fromPicker(){
+  var rgb=h2r(cc.value);var a=co.value/100;
+  var col='rgba('+rgb[0]+','+rgb[1]+','+rgb[2]+','+a+')';
+  ch.value=cc.value+toHex2(co.value*2.55);
+  applyLC(col);
+  localStorage.setItem('lc',cc.value+'|'+co.value);
+}
+function fromHex(){
+  var v=ch.value.trim();
+  if(!/^#[0-9a-fA-F]{6,8}$/.test(v))return;
+  cc.value=v.slice(0,7);
+  var a=v.length===9?parseInt(v.slice(7,9),16)/255:1;
+  co.value=Math.round(a*100);
+  fromPicker();
+}
+cc.addEventListener('input',fromPicker);
+co.addEventListener('input',fromPicker);
+ch.addEventListener('change',fromHex);
+document.addEventListener('keydown',function(e){
+  if(e.key==='`'&&e.target.tagName!=='INPUT'){
+    cm.style.display=cm.style.display==='none'?'block':'none';
+  }
+});
+var lc=localStorage.getItem('lc');
+if(lc){var p=lc.split('|');cc.value=p[0];co.value=p[1];fromPicker();}
+// === Color wheel (HSV: hue ring + saturation/value square) ===
+(function(){
+var cw=document.getElementById('cwheel');
+var ctx=cw.getContext('2d');
+var S=180,C=90,OR=87,IR=67,SQ=44;
+var H=0,Sv=1,V=1,driving=false,drag=null;
+function hsv2rgb(h,s,v){
+  var c=v*s,x=c*(1-Math.abs(h/60%2-1)),m=v-c,r,g,b;
+  if(h<60){r=c;g=x;b=0}else if(h<120){r=x;g=c;b=0}
+  else if(h<180){r=0;g=c;b=x}else if(h<240){r=0;g=x;b=c}
+  else if(h<300){r=x;g=0;b=c}else{r=c;g=0;b=x}
+  return[Math.round((r+m)*255),Math.round((g+m)*255),Math.round((b+m)*255)];
+}
+function rgb2hsv(r,g,b){
+  r/=255;g/=255;b/=255;
+  var mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn,h=0,s=mx?d/mx:0;
+  if(d){if(mx===r)h=((g-b)/d+6)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h*=60;}
+  return[h,s,mx];
+}
+function draw(){
+  ctx.clearRect(0,0,S,S);
+  for(var a=0;a<360;a++){
+    ctx.beginPath();ctx.moveTo(C,C);
+    ctx.arc(C,C,OR,(a-0.6)*Math.PI/180,(a+1.6)*Math.PI/180);
+    ctx.fillStyle='hsl('+a+',100%,50%)';ctx.fill();
+  }
+  ctx.beginPath();ctx.arc(C,C,IR,0,2*Math.PI);
+  ctx.fillStyle='#1a1a1a';ctx.fill();
+  var x0=C-SQ,y0=C-SQ,w=SQ*2;
+  var g1=ctx.createLinearGradient(x0,0,x0+w,0);
+  g1.addColorStop(0,'#fff');g1.addColorStop(1,'hsl('+H+',100%,50%)');
+  ctx.fillStyle=g1;ctx.fillRect(x0,y0,w,w);
+  var g2=ctx.createLinearGradient(0,y0,0,y0+w);
+  g2.addColorStop(0,'rgba(0,0,0,0)');g2.addColorStop(1,'#000');
+  ctx.fillStyle=g2;ctx.fillRect(x0,y0,w,w);
+  var ha=H*Math.PI/180,hr=(IR+OR)/2;
+  var hx=C+hr*Math.cos(ha),hy=C+hr*Math.sin(ha);
+  ctx.beginPath();ctx.arc(hx,hy,7,0,2*Math.PI);
+  ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+  var sx=x0+Sv*w,sy=y0+(1-V)*w;
+  ctx.beginPath();ctx.arc(sx,sy,5,0,2*Math.PI);
+  ctx.strokeStyle=V>0.4?'#000':'#fff';ctx.lineWidth=2;ctx.stroke();
+}
+function syncFromWheel(){
+  var rgb=hsv2rgb(H,Sv,V);
+  driving=true;cc.value='#'+toHex2(rgb[0])+toHex2(rgb[1])+toHex2(rgb[2]);driving=false;
+  fromPicker();
+}
+function syncToWheel(){
+  var rgb=h2r(cc.value),hsv=rgb2hsv(rgb[0],rgb[1],rgb[2]);
+  H=hsv[0];Sv=hsv[1];V=hsv[2];draw();
+}
+function evPos(e){
+  var r=cw.getBoundingClientRect(),t=e.touches?e.touches[0]:e;
+  return{x:t.clientX-r.left,y:t.clientY-r.top};
+}
+function onDown(e){
+  e.preventDefault();
+  var p=evPos(e),dx=p.x-C,dy=p.y-C,d=Math.sqrt(dx*dx+dy*dy);
+  drag=(d>IR&&d<OR)?'h':(Math.abs(dx)<SQ&&Math.abs(dy)<SQ)?'sv':null;
+  if(drag)onMove(p);
+}
+function onMove(p){
+  if(!drag)return;
+  var dx=p.x-C,dy=p.y-C,x0=C-SQ,y0=C-SQ,w=SQ*2;
+  if(drag==='h')H=(Math.atan2(dy,dx)*180/Math.PI+360)%360;
+  else{Sv=Math.max(0,Math.min(1,(p.x-x0)/w));V=Math.max(0,Math.min(1,1-(p.y-y0)/w));}
+  draw();syncFromWheel();
+}
+cw.addEventListener('mousedown',onDown);
+cw.addEventListener('touchstart',onDown,{passive:false});
+document.addEventListener('mousemove',function(e){if(drag)onMove(evPos(e));});
+document.addEventListener('touchmove',function(e){if(drag)onMove(evPos(e));},{passive:false});
+document.addEventListener('mouseup',function(){drag=null;});
+document.addEventListener('touchend',function(){drag=null;});
+cc.addEventListener('input',function(){if(!driving)syncToWheel();});
+document.getElementById('cwbtn').addEventListener('click',function(){
+  var wr=document.getElementById('cwrap');
+  var show=wr.style.display!=='flex';
+  wr.style.display=show?'flex':'none';
+  this.textContent=(show?'▲':'▼')+' Color wheel';
+  if(show)syncToWheel();
+});
+})();
+"##;
+
+    let sse_js = format!(
+        "var ls=document.querySelectorAll('.l');\
+        ls.forEach(function(el){{if(el.dataset.lca)el.style.setProperty('--lci',el.style.color);}});\
+        var pressed=location.search.indexOf('pressed')>=0;\
+        if(pressed)ls.forEach(function(el){{el.style.visibility='hidden';}});\
+        var es=new EventSource('/events');\
+        es.onmessage=function(e){{\
+        var m=parseInt(e.data.split(';')[2],10)||0;\
+        ls.forEach(function(el){{\
+        var on=!!(m&(1<<+el.dataset.id));\
+        if(pressed)el.style.visibility=on?'visible':'hidden';\
+        if(el.dataset.lca)el.style.color=on?el.dataset.lca:(el.style.getPropertyValue('--lci')||'');\
+        }});}};",
+    );
+
+    let mut out = String::new();
+    out.push_str("<!doctype html><html><head><meta charset=\"utf-8\">");
+    out.push_str("<title>obs-gamepad labels</title><style>");
+    out.push_str("@font-face{font-family:'Teko';src:url('/fonts/teko.ttf') format('truetype');font-weight:300 700;font-display:swap}");
+    out.push_str("html,body{margin:0;height:100%;overflow:hidden;background:#1e1e1e}");
+    out.push_str(&format!("#w{{position:absolute;top:0;left:0;width:{w}px;height:{h}px;transform-origin:top left}}"));
+    out.push_str("#w img{position:absolute;top:0;left:0;width:100%;height:100%}");
+    out.push_str(".l{position:absolute;transform:translate(-50%,-45%);color:#fff;line-height:1;");
+    out.push_str("font-family:'Teko',Arial,sans-serif;font-weight:700;white-space:nowrap;");
+    out.push_str("pointer-events:none;text-shadow:0 0 4px #000,0 0 4px #000}");
+    out.push_str(".ar{-webkit-text-stroke:0.08em currentColor;paint-order:stroke fill}");
+    out.push_str(panel_css);
+    out.push_str("</style></head><body>");
+    out.push_str(&format!("<div id=\"w\"><img src=\"/stream\" alt=\"overlay\">{labels}</div>"));
+    out.push_str(panel_html);
+    out.push_str("<script>");
+    out.push_str(&format!(
+        "var w=document.getElementById('w');\
+        function fit(){{var s=Math.min(innerWidth/{w},innerHeight/{h})*0.8;\
+        w.style.transform='translate('+((innerWidth-{w}*s)/2)+'px,'+((innerHeight-{h}*s)/2)+'px) scale('+s+')';}}
+        addEventListener('resize',fit);fit();"
+    ));
+    out.push_str(&sse_js);
+    out.push_str(panel_js);
+    out.push_str("</script></body></html>");
+    out
 }
 
 fn respond_static(request: Request, body: &[u8], content_type: &str) {
