@@ -403,6 +403,10 @@ impl Axis {
     }
 }
 
+const fn default_true() -> bool {
+    true
+}
+
 const fn default_fill() -> Color {
     Color::new(127, 127, 127, 127)
 }
@@ -443,6 +447,10 @@ pub struct Gamepad {
     /// Default label text color for all buttons (overridden per-button by `label_color`).
     #[serde(default)]
     pub label_color: Option<Color>,
+    /// Whether to rasterize button labels into the OBS/window render. Defaults to true.
+    /// Has no effect in web mode (labels are always an HTML overlay there).
+    #[serde(default = "default_true")]
+    pub show_labels: bool,
     #[serde(default)]
     pub buttons: Vec<Button>,
     #[serde(default)]

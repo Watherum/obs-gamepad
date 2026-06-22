@@ -16,7 +16,7 @@ use haybox::Haybox;
 use log::{error, info};
 use notify_debouncer_mini::{DebouncedEvent, DebouncedEventKind};
 use obs_wrapper::{
-    graphics::*, log::Logger, obs_register_module, obs_string, prelude::*, properties::*,
+    graphics::*, log::Logger, obs_register_module, obs_string, obs_sys, prelude::*, properties::*,
     source::*,
 };
 use tiny_skia::Pixmap;
@@ -25,6 +25,8 @@ use config::ConfigWatcher;
 use gamepad::{Backend, Gamepad, Inputs};
 use usb::UsbGamepad;
 use xinput::XInput;
+
+static LAYOUTS_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
 obs_register_module!(GamepadModule);
 struct GamepadModule {
@@ -109,9 +111,13 @@ impl<'b> Source<'b> {
                 Err(_) => error!("failed to load backend"),
             }
         }
-        if let Some(path) = settings.get::<Cow<str>>(SETTING_FILE) {
+        let preset = settings.get::<Cow<str>>(SETTING_LAYOUT);
+        let effective_path: Option<PathBuf> = match preset.as_deref() {
+            Some(name) if !name.is_empty() => LAYOUTS_DIR.get().map(|d| d.join(name)),
+            _ => settings.get::<Cow<str>>(SETTING_FILE).map(|p| PathBuf::from(p.as_ref())),
+        };
+        if let Some(new) = effective_path {
             info!("changed config");
-            let new = PathBuf::from(path.as_ref());
             if self.watcher.path.as_ref() != Some(&new) {
                 self.update_config(&new);
                 self.watcher.change_file(new).unwrap();
@@ -121,6 +127,7 @@ impl<'b> Source<'b> {
 }
 
 const SETTING_GAMEPAD: ObsString = obs_string!("gamepad");
+const SETTING_LAYOUT: ObsString = obs_string!("layout");
 const SETTING_FILE: ObsString = obs_string!("settings");
 
 impl<'b> Sourceable for Source<'b> {
@@ -160,10 +167,31 @@ impl GetPropertiesSource for Source<'_> {
             list.push(format!("XInput controller (slot {slot})"), format!("xinput:{slot}").into());
         }
 
-        let path_config = PathProp::new(PathType::File)
+        let mut layout_list =
+            props.add_list::<ObsString>(SETTING_LAYOUT, obs_string!("Layout Preset"), false);
+        layout_list.push(obs_string!("Custom\u{2026}"), obs_string!(""));
+        if let Some(dir) = LAYOUTS_DIR.get() {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                let mut names: Vec<String> = entries
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| {
+                        let name = e.file_name().to_string_lossy().into_owned();
+                        name.ends_with(".toml").then_some(name)
+                    })
+                    .collect();
+                names.sort();
+                for name in names {
+                    layout_list.push(name.clone(), name.into());
+                }
+            }
+        }
+
+        let mut path_config = PathProp::new(PathType::File)
             .with_filter(obs_string!("TOML config file (*.toml)"));
-        // TODO: set default pointing to the example.toml in the config dir
-        props.add(SETTING_FILE, obs_string!("Layout File"), path_config);
+        if let Some(dir) = LAYOUTS_DIR.get().and_then(|d| d.to_str()) {
+            path_config = path_config.with_default_path(dir.into());
+        }
+        props.add(SETTING_FILE, obs_string!("Custom Layout File"), path_config);
 
         props
     }
@@ -240,6 +268,17 @@ impl Module for GamepadModule {
             .with_icon(Icon::GameCapture)
             .build();
         load_context.register_source(source_info);
+        unsafe {
+            let raw = obs_sys::obs_get_module_binary_path(self.context.get_raw());
+            if !raw.is_null() {
+                if let Ok(s) = std::ffi::CStr::from_ptr(raw).to_str() {
+                    let layouts = Path::new(s).parent().unwrap_or(Path::new("")).join("layouts");
+                    if layouts.is_dir() {
+                        let _ = LAYOUTS_DIR.set(layouts);
+                    }
+                }
+            }
+        }
         Logger::new().init().is_ok()
     }
 

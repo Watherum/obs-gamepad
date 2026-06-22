@@ -1,8 +1,142 @@
 use std::fmt::Debug;
 
 use tiny_skia::{
-    Color, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform,
+    Color, FillRule, Mask, Paint, Path, PathBuilder, Pixmap, PremultipliedColorU8, Rect, Stroke,
+    Transform,
 };
+
+static FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Teko-Bold.ttf");
+static FONT: std::sync::OnceLock<ab_glyph::FontVec> = std::sync::OnceLock::new();
+
+fn is_arrow(c: char) -> bool {
+    matches!(c, '←' | '→' | '↑' | '↓')
+}
+
+fn draw_arrow_glyph(img: &mut Pixmap, ch: char, cx: f32, cy: f32, font_size: f32, color: Color) {
+    let hs = font_size * 0.28;
+    let hw = hs * 0.70;
+    let mut pb = PathBuilder::new();
+    match ch {
+        '→' => { pb.move_to(cx + hs, cy); pb.line_to(cx - hs, cy - hw); pb.line_to(cx - hs, cy + hw); }
+        '←' => { pb.move_to(cx - hs, cy); pb.line_to(cx + hs, cy - hw); pb.line_to(cx + hs, cy + hw); }
+        '↑' => { pb.move_to(cx, cy - hs); pb.line_to(cx - hw, cy + hs); pb.line_to(cx + hw, cy + hs); }
+        '↓' => { pb.move_to(cx, cy + hs); pb.line_to(cx - hw, cy - hs); pb.line_to(cx + hw, cy - hs); }
+        _ => return,
+    }
+    pb.close();
+    if let Some(path) = pb.finish() {
+        let mut paint = Paint { anti_alias: true, ..Default::default() };
+        paint.set_color(color);
+        img.fill_path(&path, &paint, FillRule::default(), Transform::identity(), None);
+    }
+}
+
+fn draw_label(img: &mut Pixmap, text: &str, cx_px: f32, cy_px: f32, radius_px: f32, color: Color) {
+    use ab_glyph::{Font, PxScale, ScaleFont};
+
+    let font = FONT.get_or_init(|| {
+        ab_glyph::FontVec::try_from_vec(FONT_BYTES.to_vec()).expect("bundled Teko font is valid")
+    });
+
+    // Pick a font size that fits within 88% of the button diameter, starting at 60%.
+    // Arrow chars (Teko lacks them) use a fixed cell width of 0.7× font_size.
+    let diameter = radius_px * 2.0;
+    let initial_size = diameter * 0.75;
+    let pxscale = PxScale::from(initial_size);
+    let scaled = font.as_scaled(pxscale);
+    let measured_width: f32 = text
+        .chars()
+        .map(|c| if is_arrow(c) { initial_size * 0.7 } else { scaled.h_advance(font.glyph_id(c)) })
+        .sum();
+    let max_width = diameter * 0.92;
+    let font_size = if measured_width > max_width {
+        initial_size * max_width / measured_width
+    } else {
+        initial_size
+    };
+
+    let pxscale = PxScale::from(font_size);
+    let scaled = font.as_scaled(pxscale);
+    let ascent = scaled.ascent();
+    let descent = scaled.descent(); // negative in ab_glyph convention
+    // Center the ascent+descent range at cy_px: baseline = cy_px + (ascent + descent) / 2.
+    // Round both to integer pixels so glyphs snap to pixel boundaries and stay crisp.
+    let y_baseline = (cy_px + (ascent + descent) / 2.0).round();
+
+    let mut x_cursor = 0.0f32;
+    let positions: Vec<(char, f32)> = text
+        .chars()
+        .map(|c| {
+            let x = x_cursor;
+            x_cursor += if is_arrow(c) { font_size * 0.7 } else { scaled.h_advance(font.glyph_id(c)) };
+            (c, x)
+        })
+        .collect();
+    let x_start = (cx_px - x_cursor / 2.0).round();
+
+    // Pass 1: rasterize Teko glyphs via pixel-level compositing (requires pixels_mut borrow).
+    // First render a dark shadow at 4 diagonal offsets, then the main color on top.
+    {
+        let img_w = img.width();
+        let img_h = img.height();
+        let pixels = img.pixels_mut();
+
+        let shadow = Color::from_rgba(0.0, 0.0, 0.0, 0.9).unwrap();
+        let shadow_offsets: [(f32, f32); 5] =
+            [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0), (0.0, 0.0)];
+        let pass_colors = [shadow, shadow, shadow, shadow, color];
+
+        for (offset, pass_color) in shadow_offsets.iter().zip(pass_colors.iter()) {
+            let cr = pass_color.red();
+            let cg = pass_color.green();
+            let cb = pass_color.blue();
+            let ca = pass_color.alpha();
+            for &(c, gx) in &positions {
+                if is_arrow(c) {
+                    continue;
+                }
+                let glyph = font.glyph_id(c).with_scale_and_position(
+                    pxscale,
+                    ab_glyph::point(x_start + gx + offset.0, y_baseline + offset.1),
+                );
+                let Some(outlined) = font.outline_glyph(glyph) else { continue };
+                let bounds = outlined.px_bounds();
+                outlined.draw(|x, y, coverage| {
+                    let px = bounds.min.x as i32 + x as i32;
+                    let py = bounds.min.y as i32 + y as i32;
+                    if px < 0 || py < 0 || px >= img_w as i32 || py >= img_h as i32 {
+                        return;
+                    }
+                    let idx = py as usize * img_w as usize + px as usize;
+                    let dst = pixels[idx];
+                    let src_a = ca * coverage;
+                    let inv = 1.0 - src_a;
+                    // Premultiplied "over" composite.
+                    let out_r = cr * src_a + (dst.red() as f32 / 255.0) * inv;
+                    let out_g = cg * src_a + (dst.green() as f32 / 255.0) * inv;
+                    let out_b = cb * src_a + (dst.blue() as f32 / 255.0) * inv;
+                    let out_a = src_a + (dst.alpha() as f32 / 255.0) * inv;
+                    let r = (out_r * 255.0) as u8;
+                    let g = (out_g * 255.0) as u8;
+                    let b = (out_b * 255.0) as u8;
+                    let a = (out_a * 255.0) as u8;
+                    pixels[idx] =
+                        PremultipliedColorU8::from_rgba(r.min(a), g.min(a), b.min(a), a)
+                            .unwrap_or(PremultipliedColorU8::TRANSPARENT);
+                });
+            }
+        }
+    }
+
+    // Pass 2: draw arrow chars as geometric paths (requires &mut Pixmap, not pixels).
+    for &(c, gx) in &positions {
+        if !is_arrow(c) {
+            continue;
+        }
+        let cell_cx = x_start + gx + font_size * 0.35;
+        draw_arrow_glyph(img, c, cell_cx, cy_px, font_size, color);
+    }
+}
 
 use crate::config::{self, FillDir};
 
@@ -15,6 +149,9 @@ pub struct Gamepad<'b> {
     /// same layout into a proportionally larger pixmap so it stays crisp when
     /// displayed/scaled up. The OBS plugin leaves this at 1.0.
     pub scale: f32,
+    /// Whether to rasterize button labels directly into the pixmap. Set to
+    /// `false` in web mode because the `/?labels` HTML overlay handles them.
+    pub render_labels: bool,
 }
 
 impl Default for Gamepad<'_> {
@@ -24,6 +161,7 @@ impl Default for Gamepad<'_> {
             inputs: Inputs::default(),
             input_state: InputState::default(),
             scale: 1.0,
+            render_labels: true,
         }
     }
 }
@@ -33,7 +171,7 @@ impl<'b> Gamepad<'b> {
     fn new(config: &config::Gamepad) -> Self {
         let inputs: Inputs = config.into();
         let input_state = (&inputs).into();
-        Self { backend: None, inputs, input_state, scale: 1.0 }
+        Self { backend: None, inputs, input_state, scale: 1.0, render_labels: true }
     }
 
     /// Pixel dimensions of the output image at the current `scale`.
@@ -48,6 +186,7 @@ impl<'b> Gamepad<'b> {
     pub fn reload(&mut self, config: &config::Gamepad) {
         self.inputs = config.into();
         self.input_state = (&self.inputs).into();
+        self.render_labels = config.show_labels;
         if let Some(b) = &mut self.backend {
             b.reload(&self.inputs)
         }
@@ -215,6 +354,21 @@ impl Gamepad<'_> {
                 paint.set_color(colors.get(pressed));
                 stroke.width = *weight;
                 img.stroke_path(&button.path, &paint, &stroke, t, None);
+            }
+
+            if self.render_labels {
+                if let Some(text) = &button.label {
+                    let pb = button.path.bounds();
+                    let cx_px = (pb.left() + pb.right()) / 2.0 * self.scale;
+                    let cy_px = (pb.top() + pb.bottom()) / 2.0 * self.scale;
+                    let radius_px = pb.width() / 2.0 * self.scale;
+                    let color = button
+                        .label_color
+                        .as_ref()
+                        .map(|p| p.get(pressed))
+                        .unwrap_or(Color::WHITE);
+                    draw_label(img, text, cx_px, cy_px, radius_px, color);
+                }
             }
         }
 

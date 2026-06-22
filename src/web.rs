@@ -76,6 +76,8 @@ pub fn serve(
     watch_file: PathBuf,
     port: u16,
 ) -> Result<(), ()> {
+    // Labels are rendered by the /?labels HTML overlay, not burned into the stream.
+    gamepad.render_labels = false;
     let server = match Server::http(("0.0.0.0", port)) {
         Ok(s) => s,
         Err(e) => {
@@ -163,6 +165,7 @@ pub fn serve(
                 Ok(config) => {
                     info!("Reloaded config");
                     gamepad.reload(&config);
+                    gamepad.render_labels = false;
                     let (nw, nh) = gamepad.image_size();
                     if width != nw || height != nh {
                         img = new_pixmap(&gamepad);
@@ -304,10 +307,17 @@ fn build_labels_page(gamepad: &Gamepad) -> String {
         let shrink = (4.0 / text.chars().count().max(1) as f32).clamp(0.6, 1.0);
         let fs = diameter * 0.5 * shrink;
         let mut text = html_escape(text);
-        // Arrow glyphs (from the Arial fallback) are thin; wrap them so CSS can
-        // thicken just the arrows via text-stroke, leaving lettered labels as-is.
-        for arrow in ['↑', '↓', '←', '→'] {
-            text = text.replace(arrow, &format!("<span class=\"ar\">{arrow}</span>"));
+        // Replace arrow chars with CSS border-triangles so they match the OBS
+        // geometric style and don't fall back to the system font.
+        for (arrow, css) in [
+            ('↑', "border-left:.20em solid transparent;border-right:.20em solid transparent;border-bottom:.56em solid currentColor;margin-bottom:.05em"),
+            ('↓', "border-left:.20em solid transparent;border-right:.20em solid transparent;border-top:.56em solid currentColor;margin-top:.05em"),
+            ('←', "border-top:.20em solid transparent;border-bottom:.20em solid transparent;border-right:.56em solid currentColor"),
+            ('→', "border-top:.20em solid transparent;border-bottom:.20em solid transparent;border-left:.56em solid currentColor"),
+        ] {
+            text = text.replace(arrow, &format!(
+                "<span style=\"display:inline-block;width:0;height:0;vertical-align:middle;{css}\"></span>"
+            ));
         }
         let (color_style, active_attr) = match &button.label_color {
             Some(pair) => {
@@ -511,9 +521,8 @@ document.getElementById('cwbtn').addEventListener('click',function(){
     out.push_str(&format!("#w{{position:absolute;top:0;left:0;width:{w}px;height:{h}px;transform-origin:top left}}"));
     out.push_str("#w img{position:absolute;top:0;left:0;width:100%;height:100%}");
     out.push_str(".l{position:absolute;transform:translate(-50%,-45%);color:#fff;line-height:1;");
-    out.push_str("font-family:'Teko',Arial,sans-serif;font-weight:700;white-space:nowrap;");
+    out.push_str("font-family:'Teko',sans-serif;font-weight:700;white-space:nowrap;");
     out.push_str("pointer-events:none;text-shadow:0 0 4px #000,0 0 4px #000}");
-    out.push_str(".ar{-webkit-text-stroke:0.08em currentColor;paint-order:stroke fill}");
     out.push_str(panel_css);
     out.push_str("</style></head><body>");
     out.push_str(&format!("<div id=\"w\"><img src=\"/stream\" alt=\"overlay\">{labels}</div>"));

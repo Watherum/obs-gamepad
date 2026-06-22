@@ -42,6 +42,29 @@ Run [`install.sh`](install.sh) (which is just `cargo build` + moving the files a
 
 You'll need a recent [Rust toolchain](https://rustup.rs) (the crate uses edition 2024). The native build deps (OBS headers, etc.) are listed in [flake.nix](flake.nix); on Nix you can get a dev shell with `nix develop`.
 
+### Web mode dependencies
+
+The standalone `--web` binary does **not** require OBS Studio. What you need:
+
+| Dependency | Purpose | Platform |
+| --- | --- | --- |
+| Rust toolchain (edition 2024) | Build the binary | All |
+| `libudev` | USB/serial device enumeration | Linux |
+| `libxkbcommon` | Linked by the windowing layer (minifb) | Linux |
+| `libX11`, `libXcursor` | Runtime libs for minifb | Linux |
+| `pkg-config` | Locates native libs at build time | Linux |
+
+On **Windows** there are no extra system dependencies — XInput is loaded dynamically at runtime and serial ports are handled natively.
+
+On **Linux** install the libs with your package manager, e.g.:
+```sh
+# Debian/Ubuntu
+sudo apt install libudev-dev libxkbcommon-dev libx11-dev libxcursor-dev pkg-config
+# Arch
+sudo pacman -S libudev-zero libxkbcommon libx11 libxcursor pkg-config
+```
+Or drop into the Nix dev shell (`nix develop`) which provides them automatically.
+
 The crate builds two things at once: the OBS plugin (`gamepad.dll` / `libgamepad.so`) and a standalone tester (`obs-gamepad`).
 
 ```sh
@@ -67,10 +90,19 @@ your config file and save, the changes should show up in your overlay.
 
 ### Button labels
 
-Give any button a `label = "..."` in your layout and the web overlay can draw
-the names on top (handy for documenting a stickless/box layout). Arrow glyphs
-work well for directions, e.g. `label = "←"`. See [`layouts/gram.toml`](layouts/gram.toml)
-for an example. Labels show up via the `?labels` web view (below).
+Give any button a `label = "..."` in your layout and the text will be drawn
+directly on top of each button in OBS/window mode. Arrow glyphs work well for
+directions, e.g. `label = "←"`. See [`layouts/gram.toml`](layouts/gram.toml)
+for an example.
+
+Labels are also shown in the `?labels` web view (below), where they're rendered
+as an HTML overlay instead of baked into the stream image.
+
+To hide all labels at once, set the top-level toggle in your layout file:
+
+```toml
+show_labels = false   # omit labels from the OBS/window render (default: true)
+```
 
 ### Web mode
 
