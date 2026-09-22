@@ -96,9 +96,10 @@ pub fn serve(
         Some(ip) => println!("Serving overlay at http://{ip}:{port} (also reachable from other devices on your network)"),
         None => println!("Serving overlay on port {port} at http://<this-machine-ip>:{port}"),
     }
-    println!("  rendered overlay:  /stream   (transparent MJPEG, point OBS here)");
-    println!("  CSS-skin overlay:  /skin     (Xbox fight-stick skin)");
-    println!("  labeled overlay:   /?labels  (button names, for reference)");
+    println!("  rendered overlay:  /?transparent         (point OBS Browser Source here)");
+    println!("  labeled overlay:   /?labels&transparent  (button names over the overlay)");
+    println!("  CSS-skin overlay:  /skin                 (Xbox fight-stick skin)");
+    println!("  raw frames:        /stream               (MJPEG of transparent PNGs)");
 
     // Accept connections on a background thread; each stream client gets its own thread.
     {
@@ -108,6 +109,20 @@ pub fn serve(
                 let shared = shared.clone();
                 let url = request.url().to_owned();
                 let (path, query) = url.split_once('?').unwrap_or((&url, ""));
+                let has = |flag: &str| {
+                    query.split('&').any(|p| p == flag || p.starts_with(&format!("{flag}=")))
+                };
+                // `transparent` serves the same page minus its viewer background,
+                // so OBS gets real alpha instead of needing a color key. (Loading
+                // `/stream` directly doesn't: Chromium wraps a bare image URL in
+                // its own dark image-viewer page.)
+                let page = |html: &str| {
+                    if has("transparent") {
+                        html.replace("background:#1e1e1e", "background:transparent")
+                    } else {
+                        html.to_owned()
+                    }
+                };
                 match path {
                     "/stream" => {
                         thread::spawn(move || stream_to(request, shared));
@@ -115,11 +130,14 @@ pub fn serve(
                     "/events" => {
                         thread::spawn(move || events_to(request, shared));
                     }
-                    "/" if query.split('&').any(|p| p == "labels" || p.starts_with("labels=")) => {
-                        let html = shared.labels_html.lock().unwrap().clone();
+                    "/" if has("labels") => {
+                        let html = page(&shared.labels_html.lock().unwrap());
                         respond_static(request, html.as_bytes(), "text/html; charset=utf-8");
                     }
-                    "/" => respond_static(request, INDEX_HTML.as_bytes(), "text/html; charset=utf-8"),
+                    "/" => {
+                        let html = page(INDEX_HTML);
+                        respond_static(request, html.as_bytes(), "text/html; charset=utf-8");
+                    }
                     "/skin" => respond_static(request, SKIN_HTML.as_bytes(), "text/html; charset=utf-8"),
                     "/skin/skin.css" => {
                         respond_static(request, SKIN_CSS.as_bytes(), "text/css; charset=utf-8")

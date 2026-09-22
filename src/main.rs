@@ -92,8 +92,8 @@ fn main() -> Result<(), ()> {
     let mut last_change = Instant::now();
 
     let gilrs = Gilrs::new().unwrap();
-    let ports = serialport::available_ports().unwrap_or_default();
-    let id = pick_input(&gilrs);
+    let ports = com_ports();
+    let id = pick_input(&gilrs, &ports);
 
     let config: Result<config::Gamepad, toml::de::Error> =
         toml::from_str(&fs::read_to_string(&watch_file).unwrap());
@@ -104,8 +104,7 @@ fn main() -> Result<(), ()> {
             } else if id < 10 {
                 gamepad.load::<UsbGamepad>(&c, (Gilrs::new().unwrap(), id))
             } else {
-                let name =
-                    &ports.get(id - 10).expect("couldn't find or open serial port").port_name;
+                let (name, _) = ports.get(id - 10).expect("couldn't find or open serial port");
                 gamepad.load::<Haybox>(&c, (name.clone(), 115200))
             };
             if let Err(e) = res {
@@ -187,14 +186,20 @@ fn main() -> Result<(), ()> {
     Ok(())
 }
 
-fn pick_input(gilrs: &Gilrs) -> Option<usize> {
+/// Serial ports as (name, description), sorted by name. The picker's COM ids
+/// (10+) index into this exact list, so it must be shared with the loader.
+fn com_ports() -> Vec<(String, String)> {
+    let mut ports: Vec<(String, String)> = haybox::get_ports().into_iter().collect();
+    ports.sort_by(|(a, _), (b, _)| a.cmp(b));
+    ports
+}
+
+fn pick_input(gilrs: &Gilrs, com_ports: &[(String, String)]) -> Option<usize> {
     // USB HID gamepads (ids 0–9)
     let mut usb: Vec<(usize, String)> = usb::get_devices(gilrs).into_iter().collect();
     usb.sort_by_key(|(id, _)| *id);
 
-    // Serial / Haybox (ids 10+), sorted by port name for stable ordering
-    let mut com_ports: Vec<(String, String)> = haybox::get_ports().into_iter().collect();
-    com_ports.sort_by(|(a, _), (b, _)| a.cmp(b));
+    // Serial / Haybox (ids 10+)
     let com: Vec<(usize, String)> = com_ports
         .iter()
         .enumerate()
