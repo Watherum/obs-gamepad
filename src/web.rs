@@ -17,6 +17,11 @@ use crate::config::ConfigWatcher;
 use crate::gamepad::Gamepad;
 
 const FPS: u64 = 60;
+/// While idle, re-send the current frame this often so connections stay alive.
+const KEEPALIVE: Duration = Duration::from_secs(1);
+/// Extra re-sends of a frame right after a change, in case the browser only
+/// commits a multipart frame once the next one starts arriving.
+const TRAILING_RESENDS: u8 = 2;
 const BOUNDARY: &str = "obsgamepadframe";
 
 const INDEX_HTML: &str = "<!doctype html><html><head><meta charset=\"utf-8\">\
@@ -165,6 +170,8 @@ pub fn serve(
 
     let frame_time = Duration::from_millis(1000 / FPS);
     let mut last_change = Instant::now();
+    let mut last_sent = Instant::now();
+    let mut trailing = 0u8;
     loop {
         while let Ok(DebouncedEvent { path, kind: DebouncedEventKind::Any }) =
             watcher.rx.try_recv()
@@ -202,12 +209,16 @@ pub fn serve(
             // Input changed: re-render and re-encode the frame.
             gamepad.render(&mut img);
             publish(&shared, &img, skin_event(&gamepad));
-        } else {
-            // No change: re-send the current frame anyway (cheap, no re-encode).
-            // A browser showing a multipart <img> only commits a frame once the
-            // *next* one begins arriving, so a steady ~60fps stream is what makes
-            // a release show immediately instead of lingering until the next input.
+            last_sent = Instant::now();
+            trailing = TRAILING_RESENDS;
+        } else if trailing > 0 || last_sent.elapsed() >= KEEPALIVE {
+            // No change: re-send the current frame (cheap, no re-encode) a couple
+            // of times right after a change, then only as a slow keepalive. Every
+            // resend goes out as a full PNG to each stream client, so idling at
+            // 60fps cost ~1.8 MB/s per client.
+            trailing = trailing.saturating_sub(1);
             republish(&shared);
+            last_sent = Instant::now();
         }
         thread::sleep(frame_time);
     }
