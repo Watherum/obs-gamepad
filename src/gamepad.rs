@@ -375,33 +375,16 @@ impl Gamepad<'_> {
         let mut mask = Mask::new(img.width(), img.height()).unwrap();
         for (axis, &percent) in self.inputs.axes.iter().zip(&self.input_state.axes) {
             // background
-            let rect = axis.path.bounds();
             paint.set_color(axis.fill.inactive);
             img.fill_path(&axis.path, &paint, f, t, None);
 
-            let percent = if axis.axis.invert { 1.0 - percent } else { percent };
             // active fill
-            use FillDir::*;
-            let mut left = rect.left();
-            let mut top = rect.top();
-            let mut right = rect.right();
-            let mut bottom = rect.bottom();
-            match axis.direction {
-                TopToBottom => bottom -= rect.height() * percent,
-                LeftToRight => right -= rect.width() * percent,
-                BottomToTop => top += rect.height() * (1.0 - percent),
-                RightToLeft => left += rect.width() * (1.0 - percent),
-            };
-            if let Some(rect) = Rect::from_ltrb(left, top, right, bottom)
-                && rect.width() > 0.05
-                && rect.height() > 0.05
-            {
+            if let Some(rect) = axis.active_rect(percent) {
                 mask.clear();
                 mask.fill_path(&axis.path, tiny_skia::FillRule::Winding, true, t);
 
                 let active_path = PathBuilder::from_rect(rect);
                 paint.set_color(axis.fill.active);
-                // img.fill_path(&active_path, &paint, f, t, None);
                 img.fill_path(&active_path, &paint, f, t, Some(&mask));
             }
 
@@ -414,13 +397,7 @@ impl Gamepad<'_> {
         }
 
         for (stick, &(x, y)) in self.inputs.sticks.iter().zip(&self.input_state.sticks) {
-            let deadzone = stick.deadzone;
-            let is_active =
-                !(-deadzone < x && x < deadzone && -deadzone < y && y < deadzone);
-            let x = if stick.x.invert { -x } else { x };
-            let y = if stick.x.invert { -y } else { y };
-            let cx = stick.displacement * x * (1.0 - y * y / 2.0).sqrt();
-            let cy = stick.displacement * y * (1.0 - x * x / 2.0).sqrt();
+            let (cx, cy, is_active) = stick.offset(x, y);
 
             if let Some((path, color, weight)) = &stick.gate {
                 paint.set_color(color.get(is_active));
@@ -482,6 +459,18 @@ impl Button {
 }
 
 impl Stick {
+    /// Displacement (in layout units) of the stick shape for raw input `(x, y)`,
+    /// with the circular-gate distortion, plus whether it's outside the deadzone.
+    pub fn offset(&self, x: f32, y: f32) -> (f32, f32, bool) {
+        let deadzone = self.deadzone;
+        let is_active = !(-deadzone < x && x < deadzone && -deadzone < y && y < deadzone);
+        let x = if self.x.invert { -x } else { x };
+        let y = if self.x.invert { -y } else { y };
+        let cx = self.displacement * x * (1.0 - y * y / 2.0).sqrt();
+        let cy = self.displacement * y * (1.0 - x * x / 2.0).sqrt();
+        (cx, cy, is_active)
+    }
+
     pub fn bounds(&self) -> Rect {
         let mut bounds = expand(self.path.bounds(), self.displacement);
         if let Some((_, width)) = self.outline {
@@ -495,6 +484,26 @@ impl Stick {
 }
 
 impl Axis {
+    /// The rect (in layout units) filled with the active color for `percent`,
+    /// clipped to the axis shape when drawn. `None` when it's too thin to see.
+    pub fn active_rect(&self, percent: f32) -> Option<Rect> {
+        let rect = self.path.bounds();
+        let percent = if self.axis.invert { 1.0 - percent } else { percent };
+        use FillDir::*;
+        let mut left = rect.left();
+        let mut top = rect.top();
+        let mut right = rect.right();
+        let mut bottom = rect.bottom();
+        match self.direction {
+            TopToBottom => bottom -= rect.height() * percent,
+            LeftToRight => right -= rect.width() * percent,
+            BottomToTop => top += rect.height() * (1.0 - percent),
+            RightToLeft => left += rect.width() * (1.0 - percent),
+        };
+        Rect::from_ltrb(left, top, right, bottom)
+            .filter(|r| r.width() > 0.05 && r.height() > 0.05)
+    }
+
     pub fn bounds(&self) -> Rect {
         if let Some((_, width)) = &self.outline {
             expand(self.path.bounds(), *width)

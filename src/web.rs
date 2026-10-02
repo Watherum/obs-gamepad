@@ -3,21 +3,24 @@ use std::{
     io::Write,
     net::UdpSocket,
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex},
+    sync::{
+        Arc, Condvar, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use log::{error, info};
 use notify_debouncer_mini::{DebouncedEvent, DebouncedEventKind};
 use tiny_http::{Header, Request, Response, Server, StatusCode};
-use tiny_skia::Pixmap;
+use tiny_skia::{Color, Path, PathSegment, Pixmap};
 
 use crate::config::ConfigWatcher;
-use crate::gamepad::Gamepad;
+use crate::gamepad::{ColorPair, Gamepad};
 
 const FPS: u64 = 60;
-/// While idle, re-send the current frame this often so connections stay alive.
+/// While idle, re-send the current `/stream` frame this often so connections stay alive.
 const KEEPALIVE: Duration = Duration::from_secs(1);
 /// Extra re-sends of a frame right after a change, in case the browser only
 /// commits a multipart frame once the next one starts arriving.
@@ -28,9 +31,12 @@ const INDEX_HTML: &str = "<!doctype html><html><head><meta charset=\"utf-8\">\
 <title>obs-gamepad</title><style>\
 html,body{margin:0;height:100%;background:#1e1e1e;display:flex;\
 align-items:center;justify-content:center}\
-img{width:80%;height:80%;object-fit:contain}\
-</style></head><body>\
-<img src=\"/stream\" alt=\"gamepad overlay\"></body></html>";
+img,svg{width:80%;height:80%;object-fit:contain}\
+</style></head><body>{overlay}<script>{script}</script></body></html>";
+
+/// Fallback overlay for `?png`: the server-rendered MJPEG stream instead of the
+/// SVG. Every input change costs a full PNG per client, so it's far heavier.
+const PNG_IMG: &str = "<img src=\"/stream\" alt=\"gamepad overlay\">";
 
 // CSS-skin view (served at `/skin`): HTML + localized stylesheet + button
 // sprites, all embedded so it works from any cwd and when bundled. The skin is
@@ -55,21 +61,50 @@ const SKIN_IMAGES: &[(&str, &[u8])] = &[
 // `/fonts/teko.ttf` and used for the `?labels` overlay text.
 const TEKO_TTF: &[u8] = include_bytes!("../assets/fonts/teko.ttf");
 
-/// The most recently rendered frame, encoded as a PNG. `seq` is bumped on every
-/// new frame so streaming clients can tell when there's something new to send.
-/// `mask` is the matching pressed-button bitmask (by serial id) for the `/skin` view.
+/// The latest input state. `seq` is bumped on every update so streaming clients
+/// can tell when there's something new to send.
 struct Shared {
     frame: Mutex<Frame>,
     cond: Condvar,
-    /// Pre-rendered `/?labels` overlay page (regenerated on config reload).
-    labels_html: Mutex<String>,
+    /// Pre-rendered pages (regenerated on config reload).
+    pages: Mutex<Pages>,
+    /// Connected `/stream` clients. PNGs are only rendered/encoded while > 0.
+    stream_clients: AtomicUsize,
 }
 
 struct Frame {
     seq: u64,
+    /// Last encoded PNG for `/stream`. May be stale while nobody is streaming.
     png: Vec<u8>,
-    /// SSE body for the `/skin` view: "<button-mask>;<lx>,<ly>,<rx>,<ry>".
+    /// SSE body for the `/skin` view: "<button-mask>;<lx>,<ly>,<rx>,<ry>;<raw>".
     event: String,
+    /// SSE body for the SVG overlay (`/state`), see `state_event`.
+    state: String,
+}
+
+struct Pages {
+    /// Layout generation; open pages reload when `/state` reports a new one.
+    generation: String,
+    /// The layout as inline SVG, shared by `/` and `/?labels`.
+    svg: String,
+    index: String,
+    labels: String,
+}
+
+impl Pages {
+    fn build(gamepad: &Gamepad) -> Self {
+        // Wall-clock based, so a restarted server with an edited layout also
+        // reloads already-open pages.
+        let generation = format!(
+            "{:x}",
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
+        );
+        let svg = build_svg(gamepad);
+        let script = overlay_js(&generation);
+        let index = INDEX_HTML.replace("{overlay}", &svg).replace("{script}", &script);
+        let labels = build_labels_page(gamepad, &svg, &script);
+        Self { generation, svg, index, labels }
+    }
 }
 
 /// Render `gamepad` in a loop and serve the result as a `multipart/x-mixed-replace`
@@ -92,9 +127,15 @@ pub fn serve(
     };
 
     let shared = Arc::new(Shared {
-        frame: Mutex::new(Frame { seq: 0, png: Vec::new(), event: String::new() }),
+        frame: Mutex::new(Frame {
+            seq: 0,
+            png: Vec::new(),
+            event: String::new(),
+            state: String::new(),
+        }),
         cond: Condvar::new(),
-        labels_html: Mutex::new(build_labels_page(&gamepad)),
+        pages: Mutex::new(Pages::build(&gamepad)),
+        stream_clients: AtomicUsize::new(0),
     });
 
     match local_ip() {
@@ -104,7 +145,7 @@ pub fn serve(
     println!("  rendered overlay:  /?transparent         (point OBS Browser Source here)");
     println!("  labeled overlay:   /?labels&transparent  (button names over the overlay)");
     println!("  CSS-skin overlay:  /skin                 (Xbox fight-stick skin)");
-    println!("  raw frames:        /stream               (MJPEG of transparent PNGs)");
+    println!("  raw frames:        /stream               (MJPEG of transparent PNGs; heavy, avoid)");
 
     // Accept connections on a background thread; each stream client gets its own thread.
     {
@@ -121,26 +162,33 @@ pub fn serve(
                 // so OBS gets real alpha instead of needing a color key. (Loading
                 // `/stream` directly doesn't: Chromium wraps a bare image URL in
                 // its own dark image-viewer page.)
-                let page = |html: &str| {
+                // `png` swaps the SVG for the old MJPEG `<img>` (heavy on bandwidth).
+                let page = |html: &str, svg: &str| {
+                    let mut html = html.to_owned();
                     if has("transparent") {
-                        html.replace("background:#1e1e1e", "background:transparent")
-                    } else {
-                        html.to_owned()
+                        html = html.replace("background:#1e1e1e", "background:transparent");
                     }
+                    if has("png") {
+                        html = html.replace(svg, PNG_IMG);
+                    }
+                    html
                 };
                 match path {
                     "/stream" => {
                         thread::spawn(move || stream_to(request, shared));
                     }
                     "/events" => {
-                        thread::spawn(move || events_to(request, shared));
+                        thread::spawn(move || sse_to(request, shared, |f| &f.event));
                     }
-                    "/" if has("labels") => {
-                        let html = page(&shared.labels_html.lock().unwrap());
-                        respond_static(request, html.as_bytes(), "text/html; charset=utf-8");
+                    "/state" => {
+                        thread::spawn(move || sse_to(request, shared, |f| &f.state));
                     }
                     "/" => {
-                        let html = page(INDEX_HTML);
+                        let html = {
+                            let pages = shared.pages.lock().unwrap();
+                            let html = if has("labels") { &pages.labels } else { &pages.index };
+                            page(html, &pages.svg)
+                        };
                         respond_static(request, html.as_bytes(), "text/html; charset=utf-8");
                     }
                     "/skin" => respond_static(request, SKIN_HTML.as_bytes(), "text/html; charset=utf-8"),
@@ -164,14 +212,16 @@ pub fn serve(
     // Render loop on this thread (gamepad polling isn't `Send`, so it stays here).
     let mut img = new_pixmap(&gamepad);
     let (mut width, mut height) = (img.width(), img.height());
-    gamepad.render(&mut img);
-    publish(&shared, &img, skin_event(&gamepad));
     while watcher.rx.try_recv().is_ok() {} // drain initial file-change events
 
     let frame_time = Duration::from_millis(1000 / FPS);
     let mut last_change = Instant::now();
     let mut last_sent = Instant::now();
     let mut trailing = 0u8;
+    // Input changed since the PNG was last encoded (or none was encoded yet).
+    let mut png_stale = true;
+    let mut generation = shared.pages.lock().unwrap().generation.clone();
+    let mut force = true; // publish the initial state
     loop {
         while let Ok(DebouncedEvent { path, kind: DebouncedEventKind::Any }) =
             watcher.rx.try_recv()
@@ -197,21 +247,34 @@ pub fn serve(
                         width = img.width();
                         height = img.height();
                     }
-                    gamepad.render(&mut img);
-                    publish(&shared, &img, skin_event(&gamepad));
-                    *shared.labels_html.lock().unwrap() = build_labels_page(&gamepad);
+                    // Rebuild pages before publishing the new generation, so
+                    // pages that reload on it fetch the new layout.
+                    let pages = Pages::build(&gamepad);
+                    generation = pages.generation.clone();
+                    *shared.pages.lock().unwrap() = pages;
+                    force = true;
                 }
                 Err(e) => error!("Config reload failed: {e}"),
             }
         }
 
-        if gamepad.poll() {
-            // Input changed: re-render and re-encode the frame.
-            gamepad.render(&mut img);
-            publish(&shared, &img, skin_event(&gamepad));
+        // Only `/stream` clients need rendered PNGs; the SVG pages and the skin
+        // just get the (tiny) state over SSE.
+        let streaming = shared.stream_clients.load(Ordering::Relaxed) > 0;
+        let changed = gamepad.poll() || std::mem::take(&mut force);
+        png_stale |= changed;
+        if changed || (streaming && png_stale) {
+            let png = if streaming {
+                png_stale = false;
+                gamepad.render(&mut img);
+                encode(&img)
+            } else {
+                None
+            };
+            publish(&shared, png, skin_event(&gamepad), state_event(&gamepad, &generation));
             last_sent = Instant::now();
             trailing = TRAILING_RESENDS;
-        } else if trailing > 0 || last_sent.elapsed() >= KEEPALIVE {
+        } else if streaming && (trailing > 0 || last_sent.elapsed() >= KEEPALIVE) {
             // No change: re-send the current frame (cheap, no re-encode) a couple
             // of times right after a change, then only as a slow keepalive. Every
             // resend goes out as a full PNG to each stream client, so idling at
@@ -229,18 +292,164 @@ fn new_pixmap(gamepad: &Gamepad) -> Pixmap {
     Pixmap::new(width, height).unwrap()
 }
 
-fn publish(shared: &Shared, img: &Pixmap, event: String) {
-    match img.encode_png() {
-        Ok(png) => {
-            let mut frame = shared.frame.lock().unwrap();
-            frame.seq += 1;
-            frame.png = png;
-            frame.event = event;
-            drop(frame);
-            shared.cond.notify_all();
-        }
-        Err(e) => error!("failed to encode frame as png: {e}"),
+fn encode(img: &Pixmap) -> Option<Vec<u8>> {
+    img.encode_png().map_err(|e| error!("failed to encode frame as png: {e}")).ok()
+}
+
+/// Publish new state (and a new PNG, if one was rendered) and wake all clients.
+fn publish(shared: &Shared, png: Option<Vec<u8>>, event: String, state: String) {
+    let mut frame = shared.frame.lock().unwrap();
+    frame.seq += 1;
+    if let Some(png) = png {
+        frame.png = png;
     }
+    frame.event = event;
+    frame.state = state;
+    drop(frame);
+    shared.cond.notify_all();
+}
+
+/// SSE body for the SVG overlay: "<generation>|<buttons>|<axes>|<sticks>".
+/// `buttons` is one `0`/`1` per button; `axes` is `;`-separated `x,y,w,h` active
+/// rects (`-` when empty); `sticks` is `;`-separated `dx,dy,active`. All in layout
+/// units, already resolved (invert, deadzone, gate distortion), and rounded to
+/// 0.1 so sub-pixel analog jitter doesn't produce new events.
+fn state_event(gamepad: &Gamepad, generation: &str) -> String {
+    let inputs = &gamepad.inputs;
+    let state = &gamepad.input_state;
+    let buttons: String = state.buttons.iter().map(|&p| if p { '1' } else { '0' }).collect();
+    let axes: Vec<String> = inputs
+        .axes
+        .iter()
+        .zip(&state.axes)
+        .map(|(axis, &percent)| match axis.active_rect(percent) {
+            Some(r) => format!("{:.1},{:.1},{:.1},{:.1}", r.x(), r.y(), r.width(), r.height()),
+            None => "-".into(),
+        })
+        .collect();
+    let sticks: Vec<String> = inputs
+        .sticks
+        .iter()
+        .zip(&state.sticks)
+        .map(|(stick, &(x, y))| {
+            let (cx, cy, active) = stick.offset(x, y);
+            format!("{cx:.1},{cy:.1},{}", active as u8)
+        })
+        .collect();
+    format!("{generation}|{buttons}|{}|{}", axes.join(";"), sticks.join(";"))
+}
+
+/// SVG path data for a tiny-skia path.
+fn svg_d(path: &Path) -> String {
+    let mut d = String::new();
+    for seg in path.segments() {
+        match seg {
+            PathSegment::MoveTo(p) => d += &format!("M{:.2} {:.2}", p.x, p.y),
+            PathSegment::LineTo(p) => d += &format!("L{:.2} {:.2}", p.x, p.y),
+            PathSegment::QuadTo(a, p) => {
+                d += &format!("Q{:.2} {:.2} {:.2} {:.2}", a.x, a.y, p.x, p.y)
+            }
+            PathSegment::CubicTo(a, b, p) => {
+                d += &format!(
+                    "C{:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
+                    a.x, a.y, b.x, b.y, p.x, p.y
+                )
+            }
+            PathSegment::Close => d.push('Z'),
+        }
+    }
+    d
+}
+
+fn hex_color(c: Color) -> String {
+    let u = c.to_color_u8();
+    format!("#{:02x}{:02x}{:02x}{:02x}", u.red(), u.green(), u.blue(), u.alpha())
+}
+
+/// Initial (inactive) paint attributes plus `data-c` = "inactive-fill active-fill
+/// [inactive-stroke active-stroke]", which the overlay JS swaps between.
+fn paint_attrs(fill: Option<&ColorPair>, stroke: Option<(&ColorPair, f32)>) -> String {
+    let (fi, fa) = match fill {
+        Some(f) => (hex_color(f.inactive), hex_color(f.active)),
+        None => ("none".into(), "none".into()),
+    };
+    match stroke {
+        Some((s, w)) => {
+            let (si, sa) = (hex_color(s.inactive), hex_color(s.active));
+            format!(
+                " fill=\"{fi}\" stroke=\"{si}\" stroke-width=\"{w}\" data-c=\"{fi} {fa} {si} {sa}\""
+            )
+        }
+        None => format!(" fill=\"{fi}\" data-c=\"{fi} {fa}\""),
+    }
+}
+
+/// The layout as SVG mirroring `Gamepad::render` (same paths, colors and draw
+/// order), so the browser draws the overlay itself and only needs the input
+/// state streamed to it instead of a PNG per change.
+fn build_svg(gamepad: &Gamepad) -> String {
+    let (w, h) = gamepad.image_size();
+    let inputs = &gamepad.inputs;
+    let mut out = format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w} {h}\">\
+         <g transform=\"scale({})\">",
+        gamepad.scale
+    );
+    for (i, b) in inputs.buttons.iter().enumerate() {
+        let attrs = paint_attrs(Some(&b.fill), b.outline.as_ref().map(|(c, w)| (c, *w)));
+        out += &format!("<path id=\"b{i}\" d=\"{}\"{attrs}/>", svg_d(&b.path));
+    }
+    for (i, a) in inputs.axes.iter().enumerate() {
+        let d = svg_d(&a.path);
+        out += &format!(
+            "<clipPath id=\"ac{i}\"><path d=\"{d}\"/></clipPath>\
+             <path d=\"{d}\" fill=\"{}\"/>\
+             <rect id=\"a{i}\" clip-path=\"url(#ac{i})\" fill=\"{}\" width=\"0\" height=\"0\"/>",
+            hex_color(a.fill.inactive),
+            hex_color(a.fill.active)
+        );
+        if let Some((color, weight)) = a.outline {
+            out += &format!(
+                "<path d=\"{d}\" fill=\"none\" stroke=\"{}\" stroke-width=\"{weight}\"/>",
+                hex_color(color)
+            );
+        }
+    }
+    for (i, s) in inputs.sticks.iter().enumerate() {
+        if let Some((path, colors, weight)) = &s.gate {
+            let attrs = paint_attrs(None, Some((colors, *weight)));
+            out += &format!("<path id=\"g{i}\" d=\"{}\"{attrs}/>", svg_d(path));
+        }
+        let attrs = paint_attrs(Some(&s.fill), s.outline.as_ref().map(|(c, w)| (c, *w)));
+        out += &format!(
+            "<g id=\"s{i}\"><path id=\"p{i}\" d=\"{}\"{attrs}/></g>",
+            svg_d(&s.path)
+        );
+    }
+    out += "</g></svg>";
+    out
+}
+
+/// JS that drives the SVG from `/state` (see `state_event`) and reloads the page
+/// when the server reports a new layout generation.
+fn overlay_js(generation: &str) -> String {
+    format!(
+        "(function(){{var g0='{generation}';\
+        function $(i){{return document.getElementById(i)}}\
+        function sw(el,on){{if(!el)return;var c=el.dataset.c.split(' ');\
+        el.setAttribute('fill',c[on]);if(c.length>2)el.setAttribute('stroke',c[2+on]);}}\
+        var es=new EventSource('/state');\
+        es.onmessage=function(e){{var p=e.data.split('|');\
+        if(p[0]!==g0){{location.reload();return;}}\
+        for(var i=0;i<p[1].length;i++)sw($('b'+i),+p[1][i]);\
+        if(p[2])p[2].split(';').forEach(function(r,i){{var el=$('a'+i);if(!el)return;\
+        var v=r==='-'?[0,0,0,0]:r.split(',');\
+        el.setAttribute('x',v[0]);el.setAttribute('y',v[1]);\
+        el.setAttribute('width',v[2]);el.setAttribute('height',v[3]);}});\
+        if(p[3])p[3].split(';').forEach(function(s,i){{var v=s.split(','),on=+v[2],el=$('s'+i);\
+        if(el)el.setAttribute('transform','translate('+v[0]+' '+v[1]+')');\
+        sw($('p'+i),on);sw($('g'+i),on);}});}};}})();"
+    )
 }
 
 /// Bit position of a named skin button, or `None` for a non-button role.
@@ -312,16 +521,16 @@ fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-/// Build the `/?labels` overlay page: the rendered overlay (`/stream`) with each
+/// Build the `/?labels` overlay page: the SVG overlay with each
 /// labeled button's name centered on it. Label positions are the buttons' centers
 /// in final (scaled) image coordinates, placed inside a wrapper that scales to fit
 /// the viewport so the names track the image at any display size.
 fn css_color(c: tiny_skia::Color) -> String {
     let u = c.to_color_u8();
-    format!("rgba({},{},{},{})", u.red(), u.green(), u.blue(), u.alpha())
+    format!("rgba({},{},{},{:.3})", u.red(), u.green(), u.blue(), c.alpha())
 }
 
-fn build_labels_page(gamepad: &Gamepad) -> String {
+fn build_labels_page(gamepad: &Gamepad, svg: &str, overlay_script: &str) -> String {
     let (w, h) = gamepad.image_size();
     let scale = gamepad.scale;
     let mut labels = String::new();
@@ -548,13 +757,13 @@ document.getElementById('cwbtn').addEventListener('click',function(){
     out.push_str("@font-face{font-family:'Teko';src:url('/fonts/teko.ttf') format('truetype');font-weight:300 700;font-display:swap}");
     out.push_str("html,body{margin:0;height:100%;overflow:hidden;background:#1e1e1e}");
     out.push_str(&format!("#w{{position:absolute;top:0;left:0;width:{w}px;height:{h}px;transform-origin:top left}}"));
-    out.push_str("#w img{position:absolute;top:0;left:0;width:100%;height:100%}");
+    out.push_str("#w img,#w svg{position:absolute;top:0;left:0;width:100%;height:100%}");
     out.push_str(".l{position:absolute;transform:translate(-50%,-45%);color:#fff;line-height:1;");
     out.push_str("font-family:'Teko',sans-serif;font-weight:700;white-space:nowrap;");
     out.push_str("pointer-events:none;text-shadow:0 0 4px #000,0 0 4px #000}");
     out.push_str(panel_css);
     out.push_str("</style></head><body>");
-    out.push_str(&format!("<div id=\"w\"><img src=\"/stream\" alt=\"overlay\">{labels}</div>"));
+    out.push_str(&format!("<div id=\"w\">{svg}{labels}</div>"));
     out.push_str(panel_html);
     out.push_str("<script>");
     out.push_str(&format!(
@@ -564,6 +773,7 @@ document.getElementById('cwbtn').addEventListener('click',function(){
         addEventListener('resize',fit);fit();"
     ));
     out.push_str(&sse_js);
+    out.push_str(overlay_script);
     out.push_str(panel_js);
     out.push_str("</script></body></html>");
     out
@@ -579,10 +789,11 @@ fn respond_404(request: Request) {
         .respond(Response::from_string("not found").with_status_code(StatusCode(404)));
 }
 
-/// Push the pressed-button bitmask to a `/skin` client as Server-Sent Events.
-/// Wakes on every frame `seq` bump but only emits when the mask actually changes,
-/// so the browser only does work on real input transitions.
-fn events_to(request: Request, shared: Arc<Shared>) {
+/// Push one of the frame's SSE bodies (`/events` for the skin and labels,
+/// `/state` for the SVG overlay) as Server-Sent Events. Wakes on every frame
+/// `seq` bump but only emits when the body actually changes, so idle clients
+/// cost no traffic.
+fn sse_to(request: Request, shared: Arc<Shared>, body: fn(&Frame) -> &String) {
     let mut writer = request.into_writer();
     let head = "HTTP/1.1 200 OK\r\n\
          Content-Type: text/event-stream\r\n\
@@ -602,7 +813,7 @@ fn events_to(request: Request, shared: Arc<Shared>) {
                 frame = shared.cond.wait(frame).unwrap();
             }
             last_seq = frame.seq;
-            frame.event.clone()
+            body(&frame).clone()
         };
         if !first && event == last_event {
             continue;
@@ -647,6 +858,15 @@ fn stream_to(request: Request, shared: Arc<Shared>) {
     if writer.write_all(head.as_bytes()).is_err() {
         return;
     }
+    // Counted so the render loop only renders/encodes PNGs while someone watches.
+    struct Leave<'a>(&'a AtomicUsize);
+    impl Drop for Leave<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+    shared.stream_clients.fetch_add(1, Ordering::Relaxed);
+    let _leave = Leave(&shared.stream_clients);
 
     let trailer = format!("\r\n--{BOUNDARY}\r\n");
     let mut last_seq = 0;
@@ -657,6 +877,9 @@ fn stream_to(request: Request, shared: Arc<Shared>) {
                 frame = shared.cond.wait(frame).unwrap();
             }
             last_seq = frame.seq;
+            if frame.png.is_empty() {
+                continue; // first PNG not encoded yet
+            }
             frame.png.clone()
         };
         let header =
